@@ -11,6 +11,7 @@ const {
 } = require("./lib/prompt-builder.js");
 const { runResearch } = require("./lib/research/pipeline.js");
 const { runBootstrap } = require("./lib/bootstrap/analyzer.js");
+const { runImageGeneration } = require("./lib/images/pipeline.js");
 
 if (!getApps().length) initializeApp();
 
@@ -157,6 +158,53 @@ async function handleBootstrapJob(job, jobId) {
   };
 }
 
+// ----- Images job (Phase 3b) --------------------------------------------
+// Reads a draftId from the job body. Generates image prompts via Claude,
+// renders via Replicate Flux Schnell, uploads to Cloudinary, updates the
+// draft doc with image records.
+
+async function handleImagesJob(job, jobId) {
+  // Need API keys for Anthropic + Replicate + Cloudinary
+  const userSnap = await db.collection("users").doc(job.userId).get();
+  if (!userSnap.exists) throw new Error("User not found");
+  const u = userSnap.data();
+
+  if (!u.anthropicApiKey) throw new Error("Anthropic API key not configured");
+  if (!u.replicateApiKey) throw new Error("Replicate API key not configured");
+  const c = u.cloudinary || {};
+  if (!c.cloudName || !c.apiKey || !c.apiSecret) {
+    throw new Error("Cloudinary credentials not configured");
+  }
+
+  const brandConfig = await loadBrandConfig(job.userId);
+
+  const result = await runImageGeneration({
+    db,
+    userId: job.userId,
+    jobId,
+    draftId: job.draftId,
+    brandConfig,
+    apiKeys: {
+      anthropic: u.anthropicApiKey,
+      replicate: u.replicateApiKey,
+      cloudinaryCloud: c.cloudName,
+      cloudinaryKey: c.apiKey,
+      cloudinarySecret: c.apiSecret,
+      cloudinaryFolder: c.folder || null,
+    },
+  });
+
+  return {
+    imagesSummary: {
+      draftId: job.draftId,
+      imagesCreated: result.imagesCreated,
+      imagesFailed: result.imagesFailed || 0,
+      tokensUsed: result.tokensUsed || 0,
+      aspect: result.aspect || null,
+    },
+  };
+}
+
 // ----- Unified pending-job processor ------------------------------------
 
 exports.processPendingJob = onDocumentCreated(
@@ -193,6 +241,8 @@ exports.processPendingJob = onDocumentCreated(
         result = await handleResearchJob(job, jobId);
       } else if (jobType === "bootstrap") {
         result = await handleBootstrapJob(job, jobId);
+      } else if (jobType === "images") {
+        result = await handleImagesJob(job, jobId);
       } else {
         throw new Error(`Unknown job type: ${jobType}`);
       }

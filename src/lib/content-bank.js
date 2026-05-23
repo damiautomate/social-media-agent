@@ -61,6 +61,25 @@ export async function setApiKey(userId, apiKey) {
   });
 }
 
+export async function setReplicateApiKey(userId, apiKey) {
+  await userRef(userId).update({
+    replicateApiKey: apiKey,
+    lastActiveAt: FieldValue.serverTimestamp(),
+  });
+}
+
+export async function setCloudinaryKeys(userId, { cloudName, apiKey, apiSecret, folder }) {
+  await userRef(userId).update({
+    cloudinary: {
+      cloudName,
+      apiKey,
+      apiSecret,
+      folder: folder || "social-agent",
+    },
+    lastActiveAt: FieldValue.serverTimestamp(),
+  });
+}
+
 export async function setOnboardingComplete(userId) {
   await userRef(userId).update({
     hasCompletedOnboarding: true,

@@ -1,0 +1,172 @@
+/* ============================================================
+   Social Media Agent — global styles + responsive overrides
+   ============================================================
+   The app uses inline styles everywhere. Inline styles have
+   higher specificity than CSS classes, so the media-query
+   rules below use !important to win at the breakpoints where
+   we want the layout to change.
+   ============================================================ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  max-width: 100vw;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%; /* Prevent iOS auto-zoom on landscape */
+}
+
+img,
+video,
+svg,
+canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+button,
+input,
+select,
+textarea,
+optgroup,
+option {
+  font-family: inherit;
+  color: inherit;
+}
+
+/* Keep tap targets thumb-friendly */
+button {
+  min-height: 34px;
+  touch-action: manipulation;
+}
+
+/* Anywhere a long URL / hash appears, allow wrapping */
+a,
+code {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* ============================================================
+   Helper classes that pages opt into for mobile stacking.
+   ============================================================
+   .m-stack       → becomes a single column on mobile (grids + rows)
+   .m-stack-2     → 4-col grids become 2-col on mobile
+   .m-wrap        → forces flex-wrap on mobile (for toolbars)
+   .m-hide        → hidden on mobile (for non-essential UI)
+   .m-full        → 100% width on mobile (form buttons, etc.)
+   ============================================================ */
+
+/* -------- Mobile breakpoint: ≤ 640px -------- */
+@media (max-width: 640px) {
+  /* 16px+ font on inputs prevents iOS auto-zoom on focus */
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  /* Header: tighter padding, wrap nav onto a second row */
+  header {
+    padding: 12px 14px !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+  header > nav {
+    gap: 10px !important;
+    flex-wrap: wrap !important;
+    width: 100%;
+  }
+  header > nav button {
+    font-size: 12px !important;
+    padding: 4px 6px !important;
+  }
+
+  /* Default main content padding is 24px — too much on phones */
+  main > div {
+    padding: 14px !important;
+  }
+
+  /* Helpers */
+  .m-stack {
+    grid-template-columns: 1fr !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    align-items: stretch !important;
+  }
+  .m-stack-2 {
+    grid-template-columns: 1fr 1fr !important;
+  }
+  .m-wrap {
+    flex-wrap: wrap !important;
+  }
+  .m-hide {
+    display: none !important;
+  }
+  .m-full {
+    width: 100% !important;
+  }
+
+  /* Buttons that share a row often look better stacked full-width on phones */
+  .m-actions {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .m-actions > button {
+    width: 100% !important;
+  }
+
+  /* Modal: tighter padding on mobile */
+  .m-modal {
+    padding: 16px !important;
+    width: 92vw !important;
+    max-width: 92vw !important;
+  }
+
+  /* Cards: tighter padding */
+  .m-card {
+    padding: 12px !important;
+  }
+
+  /* Tables / pre code blocks should scroll horizontally rather than overflow page */
+  pre,
+  table {
+    overflow-x: auto;
+    max-width: 100%;
+  }
+
+  /* Image preview thumbnails shrink to fit two per row on small screens */
+  .m-img-grid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+}
+
+/* -------- Small phones: ≤ 380px -------- */
+@media (max-width: 380px) {
+  header > nav {
+    gap: 6px !important;
+  }
+  header > nav button {
+    font-size: 11px !important;
+  }
+  main > div {
+    padding: 10px !important;
+  }
+  .m-stack-2 {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* -------- Tablet: 641-900px -------- */
+@media (min-width: 641px) and (max-width: 900px) {
+  main > div {
+    padding: 18px !important;
+  }
+}

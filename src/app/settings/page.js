@@ -162,6 +162,18 @@ export default function SettingsPage() {
   const [hasKey, setHasKey] = useState(false);
   const [keyInput, setKeyInput] = useState("");
   const [keyMsg, setKeyMsg] = useState({ ok: "", err: "" });
+
+  // Replicate
+  const [replicateMasked, setReplicateMasked] = useState(null);
+  const [hasReplicateKey, setHasReplicateKey] = useState(false);
+  const [replicateInput, setReplicateInput] = useState("");
+  const [replicateMsg, setReplicateMsg] = useState({ ok: "", err: "" });
+
+  // Cloudinary
+  const [cloudinaryInfo, setCloudinaryInfo] = useState({ hasCreds: false, cloudName: "", apiKeyMasked: null, folder: "" });
+  const [cloudinaryInput, setCloudinaryInput] = useState({ cloudName: "", apiKey: "", apiSecret: "", folder: "social-agent" });
+  const [cloudinaryMsg, setCloudinaryMsg] = useState({ ok: "", err: "" });
+
   const [savedMsg, setSavedMsg] = useState({ ok: "", err: "" });
   const [busy, setBusy] = useState(false);
 
@@ -173,13 +185,26 @@ export default function SettingsPage() {
       }
       setUser(u);
       const token = await u.getIdToken();
-      const [cfg, key] = await Promise.all([
+      const [cfg, key, repKey, cloud] = await Promise.all([
         fetch("/api/brand-config", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
         fetch("/api/api-key", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
+        fetch("/api/replicate-key", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/cloudinary-keys", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => ({})),
       ]);
       setConfig(cfg.brandConfig || null);
       setHasKey(!!key.hasKey);
       setMaskedKey(key.masked);
+      setHasReplicateKey(!!repKey.hasKey);
+      setReplicateMasked(repKey.masked);
+      setCloudinaryInfo({
+        hasCreds: !!cloud.hasCreds,
+        cloudName: cloud.cloudName || "",
+        apiKeyMasked: cloud.apiKeyMasked || null,
+        folder: cloud.folder || "",
+      });
+      if (cloud.cloudName) {
+        setCloudinaryInput((s) => ({ ...s, cloudName: cloud.cloudName, folder: cloud.folder || "social-agent" }));
+      }
     });
     return unsub;
   }, [router]);
@@ -232,6 +257,48 @@ export default function SettingsPage() {
     }
   }
 
+  async function saveReplicateKey() {
+    setReplicateMsg({ ok: "", err: "" });
+    setBusy(true);
+    const res = await authedFetch("/api/replicate-key", {
+      method: "POST",
+      body: JSON.stringify({ apiKey: replicateInput }),
+    });
+    setBusy(false);
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setHasReplicateKey(true);
+      setReplicateMasked(data.masked);
+      setReplicateInput("");
+      setReplicateMsg({ ok: "Verified and saved.", err: "" });
+    } else {
+      setReplicateMsg({ ok: "", err: data.error + (data.detail ? `: ${data.detail}` : "") });
+    }
+  }
+
+  async function saveCloudinaryKeys() {
+    setCloudinaryMsg({ ok: "", err: "" });
+    setBusy(true);
+    const res = await authedFetch("/api/cloudinary-keys", {
+      method: "POST",
+      body: JSON.stringify(cloudinaryInput),
+    });
+    setBusy(false);
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setCloudinaryInfo({
+        hasCreds: true,
+        cloudName: cloudinaryInput.cloudName,
+        apiKeyMasked: `••••••••${cloudinaryInput.apiKey.slice(-4)}`,
+        folder: cloudinaryInput.folder,
+      });
+      setCloudinaryInput((s) => ({ ...s, apiKey: "", apiSecret: "" }));
+      setCloudinaryMsg({ ok: "Verified and saved.", err: "" });
+    } else {
+      setCloudinaryMsg({ ok: "", err: data.error + (data.detail ? `: ${data.detail}` : "") });
+    }
+  }
+
   if (!user || !config) {
     return (
       <main style={styles.page}>
@@ -281,6 +348,149 @@ export default function SettingsPage() {
           </div>
           {keyMsg.ok ? <div style={styles.ok}>{keyMsg.ok}</div> : null}
           {keyMsg.err ? <div style={styles.err}>{keyMsg.err}</div> : null}
+        </div>
+
+        <div style={styles.section}>
+          <h2 style={styles.h2}>Replicate API Key</h2>
+          <div style={{ color: "#a1a1aa", fontSize: 13 }}>
+            Powers image generation (Flux Schnell). Get one at{" "}
+            <a href="https://replicate.com/account/api-tokens" target="_blank" rel="noopener noreferrer" style={{ color: "#a78bfa" }}>
+              replicate.com/account/api-tokens
+            </a>. {hasReplicateKey ? `Current: ${replicateMasked}` : "No key on file."}
+          </div>
+          <label style={styles.label}>Replace key</label>
+          <input
+            type="password"
+            placeholder="r8_..."
+            value={replicateInput}
+            onChange={(e) => setReplicateInput(e.target.value)}
+            style={styles.input}
+          />
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button style={styles.primary} disabled={busy || !replicateInput} onClick={saveReplicateKey}>
+              {busy ? "Verifying..." : "Test and save"}
+            </button>
+          </div>
+          {replicateMsg.ok ? <div style={styles.ok}>{replicateMsg.ok}</div> : null}
+          {replicateMsg.err ? <div style={styles.err}>{replicateMsg.err}</div> : null}
+        </div>
+
+        <div style={styles.section}>
+          <h2 style={styles.h2}>Cloudinary</h2>
+          <div style={{ color: "#a1a1aa", fontSize: 13 }}>
+            Where generated images are hosted. Find these in your Cloudinary dashboard under "Product Environment Credentials".
+            {cloudinaryInfo.hasCreds ? (
+              <>
+                <br />Current cloud: <strong>{cloudinaryInfo.cloudName}</strong> · API key: {cloudinaryInfo.apiKeyMasked} · Folder: {cloudinaryInfo.folder}
+              </>
+            ) : (
+              <><br />Not configured.</>
+            )}
+          </div>
+          <label style={styles.label}>Cloud name</label>
+          <input
+            style={styles.input}
+            placeholder="e.g. dvzk1it71"
+            value={cloudinaryInput.cloudName}
+            onChange={(e) => setCloudinaryInput({ ...cloudinaryInput, cloudName: e.target.value })}
+          />
+          <label style={styles.label}>API Key</label>
+          <input
+            type="password"
+            style={styles.input}
+            placeholder="12-digit number"
+            value={cloudinaryInput.apiKey}
+            onChange={(e) => setCloudinaryInput({ ...cloudinaryInput, apiKey: e.target.value })}
+          />
+          <label style={styles.label}>API Secret</label>
+          <input
+            type="password"
+            style={styles.input}
+            placeholder="long alphanumeric string"
+            value={cloudinaryInput.apiSecret}
+            onChange={(e) => setCloudinaryInput({ ...cloudinaryInput, apiSecret: e.target.value })}
+          />
+          <label style={styles.label}>Folder (organizes uploads inside Cloudinary)</label>
+          <input
+            style={styles.input}
+            placeholder="social-agent"
+            value={cloudinaryInput.folder}
+            onChange={(e) => setCloudinaryInput({ ...cloudinaryInput, folder: e.target.value })}
+          />
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button
+              style={styles.primary}
+              disabled={busy || !cloudinaryInput.cloudName || !cloudinaryInput.apiKey || !cloudinaryInput.apiSecret}
+              onClick={saveCloudinaryKeys}
+            >
+              {busy ? "Verifying..." : "Test and save"}
+            </button>
+          </div>
+          {cloudinaryMsg.ok ? <div style={styles.ok}>{cloudinaryMsg.ok}</div> : null}
+          {cloudinaryMsg.err ? <div style={styles.err}>{cloudinaryMsg.err}</div> : null}
+        </div>
+
+        <div style={styles.section}>
+          <h2 style={styles.h2}>Visual Style</h2>
+          <p style={{ color: "#71717a", fontSize: 12, marginBottom: 12 }}>
+            Shapes every image the AI generates for your drafts. Be specific — "earthy, hand-drawn, warm beige and forest green" beats "modern and clean".
+          </p>
+
+          <label style={styles.label}>Description (what your images should feel like)</label>
+          <textarea
+            style={{ ...styles.input, minHeight: 70, fontFamily: "inherit", lineHeight: 1.5 }}
+            value={config.visualStyle?.description || ""}
+            onChange={(e) => setConfig({
+              ...config,
+              visualStyle: { ...(config.visualStyle || {}), description: e.target.value },
+            })}
+          />
+
+          <label style={styles.label}>Aesthetic category (free text, e.g. modern_minimalist, editorial, hand_drawn)</label>
+          <input
+            style={styles.input}
+            value={config.visualStyle?.aesthetic || ""}
+            onChange={(e) => setConfig({
+              ...config,
+              visualStyle: { ...(config.visualStyle || {}), aesthetic: e.target.value },
+            })}
+          />
+
+          <label style={styles.label}>Color palette (comma-separated hex codes)</label>
+          <input
+            style={styles.input}
+            placeholder="#0F1B2D, #D4AF37, #FFFFFF"
+            value={(config.visualStyle?.colorPalette || []).join(", ")}
+            onChange={(e) => setConfig({
+              ...config,
+              visualStyle: {
+                ...(config.visualStyle || {}),
+                colorPalette: e.target.value.split(",").map((x) => x.trim()).filter(Boolean),
+              },
+            })}
+          />
+
+          <label style={styles.label}>Avoid (one item per line)</label>
+          <textarea
+            style={{ ...styles.input, minHeight: 80, fontFamily: "inherit", lineHeight: 1.5 }}
+            placeholder={"stock photo cliches\nAI-art tells (warped hands)\nlens flares"}
+            value={(config.visualStyle?.avoidElements || []).join("\n")}
+            onChange={(e) => setConfig({
+              ...config,
+              visualStyle: {
+                ...(config.visualStyle || {}),
+                avoidElements: e.target.value.split("\n").map((x) => x.trim()).filter(Boolean),
+              },
+            })}
+          />
+
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <button
+              style={styles.primary}
+              disabled={busy}
+              onClick={() => saveSection({ visualStyle: config.visualStyle })}
+            >Save visual style</button>
+          </div>
         </div>
 
         <div
@@ -554,7 +764,7 @@ export default function SettingsPage() {
           </select>
 
           <label style={styles.label}>Scoring weights (should sum to 1.0)</label>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+          <div className="m-stack-2" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
             {["relevance", "novelty", "voiceFit", "urgency"].map((key) => (
               <div key={key}>
                 <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>{key}</div>
@@ -606,7 +816,7 @@ export default function SettingsPage() {
                   opacity: s.enabled === false ? 0.55 : 1,
                 }}
               >
-                <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 100px auto", gap: 8, alignItems: "center" }}>
+                <div className="m-stack" style={{ display: "grid", gridTemplateColumns: "120px 1fr 100px auto", gap: 8, alignItems: "center" }}>
                   <select
                     style={styles.input}
                     value={s.type}
@@ -636,7 +846,7 @@ export default function SettingsPage() {
 
                 <div style={{ marginTop: 8 }}>
                   {s.type === "reddit" ? (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 100px", gap: 8 }}>
+                    <div className="m-stack" style={{ display: "grid", gridTemplateColumns: "1fr 100px", gap: 8 }}>
                       <input
                         style={styles.input}
                         placeholder="Subreddit (no r/)"
@@ -675,7 +885,7 @@ export default function SettingsPage() {
 
                   {s.type === "hackernews" ? (
                     <div>
-                      <div style={{ display: "grid", gridTemplateColumns: "100px 1fr", gap: 8 }}>
+                      <div className="m-stack" style={{ display: "grid", gridTemplateColumns: "100px 1fr", gap: 8 }}>
                         <input
                           style={styles.input}
                           type="number"

@@ -105,7 +105,7 @@ function UseIdeaModal({ idea, onClose, onConfirm, busy }) {
   if (!idea) return null;
   return (
     <div style={styles.modalBackdrop} onClick={onClose}>
-      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+      <div className="m-modal" style={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div style={styles.modalTitle}>Generate a draft from this idea</div>
         <div style={{ color: "#a1a1aa", fontSize: 13, marginBottom: 12 }}>{idea.topic}</div>
         <label style={{ fontSize: 12, color: "#a1a1aa", display: "block", marginBottom: 4 }}>Platform</label>

@@ -58,7 +58,7 @@ function ArrayEditor({ values, onChange, placeholder }) {
 function PillarEditor({ pillar, onChange, onRemove }) {
   return (
     <div style={styles.pillarRow}>
-      <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 80px auto", gap: 8, alignItems: "center" }}>
+      <div className="m-stack" style={{ display: "grid", gridTemplateColumns: "120px 1fr 80px auto", gap: 8, alignItems: "center" }}>
         <input
           style={styles.input}
           placeholder="id"

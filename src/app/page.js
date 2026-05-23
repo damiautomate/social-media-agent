@@ -167,6 +167,47 @@ const styles = {
     cursor: "pointer",
     fontSize: 12,
   },
+  btnImages: {
+    padding: "6px 12px",
+    backgroundColor: "#312e81",
+    color: "#c7d2fe",
+    border: "1px solid #4338ca",
+    borderRadius: 6,
+    cursor: "pointer",
+    fontSize: 12,
+  },
+  imagesRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+    gap: 8,
+    marginTop: 12,
+  },
+  imageThumb: {
+    width: "100%",
+    aspectRatio: "1 / 1",
+    objectFit: "cover",
+    borderRadius: 8,
+    border: "1px solid #27272a",
+    backgroundColor: "#09090b",
+  },
+  imagesPending: {
+    color: "#a78bfa",
+    fontSize: 12,
+    marginTop: 10,
+    padding: "8px 12px",
+    backgroundColor: "#1e1b4b",
+    borderRadius: 6,
+    border: "1px solid #4c1d95",
+  },
+  imagesError: {
+    color: "#fca5a5",
+    fontSize: 12,
+    marginTop: 10,
+    padding: "8px 12px",
+    backgroundColor: "#450a0a",
+    borderRadius: 6,
+    border: "1px solid #7f1d1d",
+  },
   empty: {
     textAlign: "center",
     padding: 40,
@@ -343,6 +384,17 @@ export default function Dashboard() {
     });
   }
 
+  async function generateImages(draftId) {
+    const res = await authedFetch("/api/images/generate", {
+      method: "POST",
+      body: JSON.stringify({ draftId }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Failed to start image generation");
+    }
+  }
+
   async function logout() {
     await signOut(auth);
     router.replace("/login");
@@ -370,13 +422,14 @@ export default function Dashboard() {
         <nav style={styles.nav}>
           <button style={styles.navLink} onClick={() => router.push("/")}>Dashboard</button>
           <button style={styles.navLink} onClick={() => router.push("/ideas")}>Ideas</button>
+          <button style={styles.navLink} onClick={() => router.push("/bootstrap")}>Bootstrap</button>
           <button style={styles.navLink} onClick={() => router.push("/settings")}>Settings</button>
           <button style={styles.navLink} onClick={logout}>Sign out</button>
         </nav>
       </header>
 
       <div style={styles.main}>
-        <div style={styles.statsRow}>
+        <div className="m-stack-2" style={styles.statsRow}>
           <div style={styles.stat}>
             <div style={styles.statLabel}>Pending</div>
             <div style={styles.statValue}>{stats.pending}</div>
@@ -424,7 +477,7 @@ export default function Dashboard() {
 
         {showGen ? (
           <div style={styles.panel}>
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 2fr 1fr 1fr", gap: 8 }}>
+            <div className="m-stack" style={{ display: "grid", gridTemplateColumns: "2fr 2fr 1fr 1fr", gap: 8 }}>
               <input
                 placeholder="Topic"
                 value={topic}
@@ -511,6 +564,30 @@ export default function Dashboard() {
               {d.contentNotes ? (
                 <div style={styles.meta}>{d.contentNotes}</div>
               ) : null}
+
+              {d.imagesStatus === "generating" ? (
+                <div style={styles.imagesPending}>
+                  Generating images… (usually 20-60 seconds)
+                </div>
+              ) : null}
+
+              {d.imagesStatus === "failed" || d.imagesStatus === "partial" ? (
+                <div style={styles.imagesError}>
+                  {d.imagesStatus === "partial" ? "Some images failed: " : "Image generation failed: "}
+                  {d.imagesError || "unknown error"}
+                </div>
+              ) : null}
+
+              {Array.isArray(d.images) && d.images.length > 0 ? (
+                <div className="m-img-grid" style={styles.imagesRow}>
+                  {d.images.map((img, i) => (
+                    <a key={i} href={img.url} target="_blank" rel="noopener noreferrer" title={img.prompt || ""}>
+                      <img src={img.url} alt={img.slot || `image-${i}`} style={styles.imageThumb} />
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+
               <div style={styles.actions}>
                 <button
                   style={styles.btnApprove}
@@ -520,6 +597,19 @@ export default function Dashboard() {
                   style={styles.btnReject}
                   onClick={() => setDraftStatus(d.id, "rejected")}
                 >Reject</button>
+                {d.formatType !== "document" ? (
+                  <button
+                    style={styles.btnImages}
+                    onClick={() => generateImages(d.id)}
+                    disabled={d.imagesStatus === "generating"}
+                  >
+                    {d.imagesStatus === "generating"
+                      ? "Generating…"
+                      : (Array.isArray(d.images) && d.images.length > 0)
+                        ? "Regenerate images"
+                        : "Generate images"}
+                  </button>
+                ) : null}
               </div>
             </div>
           ))

@@ -149,6 +149,22 @@ export const DEFAULT_BRAND_TEMPLATE = {
       },
     },
   },
+  // ---- Phase 3b: Visual style ----
+  // Drives image generation. Every image prompt is shaped by this block.
+  visualStyle: {
+    description:
+      "Modern, clean, content-focused photography and minimal illustration. Warm but not saturated. Editorial feel, never stocky.",
+    aesthetic: "modern_minimalist",
+    colorPalette: ["#0F1B2D", "#D4AF37", "#FFFFFF", "#E5E7EB"],
+    avoidElements: [
+      "embedded text or typography",
+      "stock-photo cliches (handshakes, businesspeople pointing at screens)",
+      "AI-art tells (warped hands, melted faces, oversaturated palettes)",
+      "lens flares and bloom effects",
+      "watermarks or signage",
+    ],
+    referenceUrls: [],
+  },
   // ---- Phase 2: Research Agent ----
   // Auto-populates the ideas bank weekly (and on-demand) from real-world signals.
   research: {
