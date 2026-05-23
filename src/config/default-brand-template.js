@@ -149,6 +149,58 @@ export const DEFAULT_BRAND_TEMPLATE = {
       },
     },
   },
+  // ---- Phase 2: Research Agent ----
+  // Auto-populates the ideas bank weekly (and on-demand) from real-world signals.
+  research: {
+    enabled: true,
+    schedule: { dayOfWeek: "monday", hourUtc: 6 },
+    targetIdeasPerRun: 12,
+    dedupeWindowDays: 14,
+    // Composite relevanceScore (0-10) = sum(score * weight) across these four dimensions.
+    // Weights sum to 1.0.
+    scoringWeights: {
+      relevance: 0.35,
+      novelty: 0.25,
+      voiceFit: 0.25,
+      urgency: 0.15,
+    },
+    sources: [
+      // --- Reddit ---
+      { id: "rd_automation",    type: "reddit", enabled: true,  label: "r/automation",          config: { subreddit: "automation",          limit: 25 } },
+      { id: "rd_n8n",           type: "reddit", enabled: true,  label: "r/n8n",                 config: { subreddit: "n8n",                 limit: 20 } },
+      { id: "rd_zapier",        type: "reddit", enabled: true,  label: "r/zapier",              config: { subreddit: "zapier",              limit: 15 } },
+      { id: "rd_marketingauto", type: "reddit", enabled: true,  label: "r/marketingautomation", config: { subreddit: "marketingautomation", limit: 20 } },
+      { id: "rd_freelance",     type: "reddit", enabled: true,  label: "r/freelance",           config: { subreddit: "freelance",           limit: 20 } },
+      { id: "rd_entrepreneur",  type: "reddit", enabled: false, label: "r/Entrepreneur",        config: { subreddit: "Entrepreneur",        limit: 15 } },
+
+      // --- Hacker News ---
+      // Filters top stories by minScore AND optional keyword match (any keyword).
+      // Leave keywords [] to send all qualifying stories to Claude for filtering.
+      {
+        id: "hn_top",
+        type: "hackernews",
+        enabled: true,
+        label: "Hacker News top stories",
+        config: {
+          minScore: 100,
+          keywords: ["automation", "crm", "no-code", "ai agent", "saas", "freelance"],
+        },
+      },
+
+      // --- RSS ---
+      // Seed with safe, popular feeds. User adds more from Settings.
+      { id: "rss_zapier_blog", type: "rss", enabled: true, label: "Zapier Blog",
+        config: { url: "https://zapier.com/blog/feeds/latest/" } },
+      { id: "rss_n8n_blog",    type: "rss", enabled: true, label: "n8n Blog",
+        config: { url: "https://blog.n8n.io/rss/" } },
+
+      // --- YouTube channel RSS ---
+      // Format: https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL_ID}
+      // Channel ID is NOT the @handle. Find it by opening any video on the channel,
+      // viewing page source, and searching for "channelId":"UC...".
+      // Empty by default — add tracked competitor channels from Settings.
+    ],
+  },
 };
 
 export default DEFAULT_BRAND_TEMPLATE;

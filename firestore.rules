@@ -28,12 +28,16 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Pending jobs and analytics are server-only end to end.
+    // Pending jobs, analytics, and research signals are server-only end to end.
     match /pending_jobs/{jobId} {
       allow read, write: if false;
     }
 
     match /analytics/{analyticsId} {
+      allow read, write: if false;
+    }
+
+    match /research_signals/{signalId} {
       allow read, write: if false;
     }
 

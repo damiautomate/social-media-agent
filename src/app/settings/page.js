@@ -246,6 +246,7 @@ export default function SettingsPage() {
         <div style={styles.brand}>Settings</div>
         <nav style={styles.nav}>
           <button style={styles.navLink} onClick={() => router.push("/")}>Dashboard</button>
+          <button style={styles.navLink} onClick={() => router.push("/ideas")}>Ideas</button>
           <button style={styles.navLink} onClick={() => router.push("/settings")}>Settings</button>
           <button style={styles.navLink} onClick={async () => { await signOut(auth); router.replace("/login"); }}>Sign out</button>
         </nav>
@@ -468,6 +469,243 @@ export default function SettingsPage() {
               disabled={busy}
               onClick={() => saveSection({ contentPillars: config.contentPillars })}
             >Save pillars</button>
+          </div>
+        </div>
+
+        <div style={styles.section}>
+          <h2 style={styles.h2}>Research Sources</h2>
+          <p style={{ color: "#71717a", fontSize: 12, marginBottom: 12 }}>
+            Sources the weekly research agent pulls from. Disabled rows are skipped.
+            Reddit needs a subreddit name. RSS needs a feed URL. YouTube needs a channel ID
+            (not the @handle — find it in any channel video's page source under "channelId":"UC...").
+          </p>
+
+          <label style={styles.label}>Target ideas per run</label>
+          <input
+            style={styles.input}
+            type="number"
+            min={1}
+            max={50}
+            value={config.research?.targetIdeasPerRun ?? 12}
+            onChange={(e) =>
+              setConfig({
+                ...config,
+                research: {
+                  ...(config.research || {}),
+                  targetIdeasPerRun: Number(e.target.value) || 12,
+                },
+              })
+            }
+          />
+
+          <label style={styles.label}>Dedupe window (days)</label>
+          <input
+            style={styles.input}
+            type="number"
+            min={1}
+            max={90}
+            value={config.research?.dedupeWindowDays ?? 14}
+            onChange={(e) =>
+              setConfig({
+                ...config,
+                research: {
+                  ...(config.research || {}),
+                  dedupeWindowDays: Number(e.target.value) || 14,
+                },
+              })
+            }
+          />
+
+          <label style={styles.label}>Enabled</label>
+          <select
+            style={{ ...styles.input, width: "auto" }}
+            value={config.research?.enabled === false ? "off" : "on"}
+            onChange={(e) =>
+              setConfig({
+                ...config,
+                research: {
+                  ...(config.research || {}),
+                  enabled: e.target.value === "on",
+                },
+              })
+            }
+          >
+            <option value="on">On — runs weekly</option>
+            <option value="off">Off — won't run</option>
+          </select>
+
+          <label style={styles.label}>Scoring weights (should sum to 1.0)</label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+            {["relevance", "novelty", "voiceFit", "urgency"].map((key) => (
+              <div key={key}>
+                <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4 }}>{key}</div>
+                <input
+                  style={styles.input}
+                  type="number"
+                  step={0.05}
+                  min={0}
+                  max={1}
+                  value={config.research?.scoringWeights?.[key] ?? 0}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      research: {
+                        ...(config.research || {}),
+                        scoringWeights: {
+                          ...(config.research?.scoringWeights || {}),
+                          [key]: Number(e.target.value) || 0,
+                        },
+                      },
+                    })
+                  }
+                />
+              </div>
+            ))}
+          </div>
+
+          <label style={styles.label}>Sources</label>
+          {(config.research?.sources || []).map((s, idx) => {
+            const updateSource = (patch) => {
+              const list = [...(config.research?.sources || [])];
+              list[idx] = { ...s, ...patch };
+              setConfig({ ...config, research: { ...(config.research || {}), sources: list } });
+            };
+            const updateConfig = (patch) =>
+              updateSource({ config: { ...(s.config || {}), ...patch } });
+            const remove = () => {
+              const list = (config.research?.sources || []).filter((_, i) => i !== idx);
+              setConfig({ ...config, research: { ...(config.research || {}), sources: list } });
+            };
+            return (
+              <div
+                key={s.id || idx}
+                style={{
+                  marginTop: 8,
+                  padding: 10,
+                  border: "1px solid #27272a",
+                  borderRadius: 8,
+                  opacity: s.enabled === false ? 0.55 : 1,
+                }}
+              >
+                <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 100px auto", gap: 8, alignItems: "center" }}>
+                  <select
+                    style={styles.input}
+                    value={s.type}
+                    onChange={(e) => updateSource({ type: e.target.value })}
+                  >
+                    <option value="reddit">reddit</option>
+                    <option value="hackernews">hackernews</option>
+                    <option value="rss">rss</option>
+                    <option value="youtube">youtube</option>
+                  </select>
+                  <input
+                    style={styles.input}
+                    placeholder="Label (e.g. r/automation)"
+                    value={s.label || ""}
+                    onChange={(e) => updateSource({ label: e.target.value })}
+                  />
+                  <select
+                    style={styles.input}
+                    value={s.enabled === false ? "off" : "on"}
+                    onChange={(e) => updateSource({ enabled: e.target.value === "on" })}
+                  >
+                    <option value="on">enabled</option>
+                    <option value="off">disabled</option>
+                  </select>
+                  <button style={styles.danger} onClick={remove}>×</button>
+                </div>
+
+                <div style={{ marginTop: 8 }}>
+                  {s.type === "reddit" ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 100px", gap: 8 }}>
+                      <input
+                        style={styles.input}
+                        placeholder="Subreddit (no r/)"
+                        value={s.config?.subreddit || ""}
+                        onChange={(e) => updateConfig({ subreddit: e.target.value })}
+                      />
+                      <input
+                        style={styles.input}
+                        type="number"
+                        min={5}
+                        max={50}
+                        placeholder="Limit"
+                        value={s.config?.limit ?? 25}
+                        onChange={(e) => updateConfig({ limit: Number(e.target.value) || 25 })}
+                      />
+                    </div>
+                  ) : null}
+
+                  {s.type === "rss" ? (
+                    <input
+                      style={styles.input}
+                      placeholder="https://example.com/feed.xml"
+                      value={s.config?.url || ""}
+                      onChange={(e) => updateConfig({ url: e.target.value })}
+                    />
+                  ) : null}
+
+                  {s.type === "youtube" ? (
+                    <input
+                      style={styles.input}
+                      placeholder="Channel ID (UC...)"
+                      value={s.config?.channelId || ""}
+                      onChange={(e) => updateConfig({ channelId: e.target.value })}
+                    />
+                  ) : null}
+
+                  {s.type === "hackernews" ? (
+                    <div>
+                      <div style={{ display: "grid", gridTemplateColumns: "100px 1fr", gap: 8 }}>
+                        <input
+                          style={styles.input}
+                          type="number"
+                          placeholder="Min score"
+                          value={s.config?.minScore ?? 100}
+                          onChange={(e) => updateConfig({ minScore: Number(e.target.value) || 0 })}
+                        />
+                        <input
+                          style={styles.input}
+                          placeholder="Keywords (comma-separated, optional)"
+                          value={(s.config?.keywords || []).join(", ")}
+                          onChange={(e) =>
+                            updateConfig({
+                              keywords: e.target.value.split(",").map((x) => x.trim()).filter(Boolean),
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+
+          <button
+            style={{ ...styles.ghost, marginTop: 10 }}
+            onClick={() => {
+              const id = `src-${Date.now()}`;
+              const list = config.research?.sources || [];
+              setConfig({
+                ...config,
+                research: {
+                  ...(config.research || {}),
+                  sources: [
+                    ...list,
+                    { id, type: "reddit", enabled: true, label: "New source", config: { subreddit: "", limit: 25 } },
+                  ],
+                },
+              });
+            }}
+          >+ Add source</button>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <button
+              style={styles.primary}
+              disabled={busy}
+              onClick={() => saveSection({ research: config.research })}
+            >Save research settings</button>
           </div>
         </div>
 

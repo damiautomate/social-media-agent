@@ -369,6 +369,7 @@ export default function Dashboard() {
         </div>
         <nav style={styles.nav}>
           <button style={styles.navLink} onClick={() => router.push("/")}>Dashboard</button>
+          <button style={styles.navLink} onClick={() => router.push("/ideas")}>Ideas</button>
           <button style={styles.navLink} onClick={() => router.push("/settings")}>Settings</button>
           <button style={styles.navLink} onClick={logout}>Sign out</button>
         </nav>

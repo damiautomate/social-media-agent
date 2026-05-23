@@ -44,12 +44,39 @@
       ]
     },
     {
+      "collectionGroup": "ideas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "relevanceScore", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ideas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "pillar", "order": "ASCENDING" },
+        { "fieldPath": "relevanceScore", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "pending_jobs",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "userId", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "pending_jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "type", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
       ]
     }
   ],

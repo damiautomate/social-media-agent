@@ -36,6 +36,16 @@ export async function bootstrapNewUser(userId, { email, displayName, photoURL })
       ...DEFAULT_BRAND_TEMPLATE,
       updatedAt: FieldValue.serverTimestamp(),
     });
+  } else {
+    // Backfill the `research` block for users created before Phase 2 shipped.
+    // Non-destructive: only sets if missing.
+    const data = brandSnap.data() || {};
+    if (!data.research) {
+      await brandConfigRef(userId).set(
+        { research: DEFAULT_BRAND_TEMPLATE.research, updatedAt: FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+    }
   }
 }
 
@@ -111,6 +121,33 @@ export async function createPendingJob(userId, job) {
     completedAt: null,
   });
   return ref.id;
+}
+
+// New in Phase 2: create a research-type job.
+// The Cloud Function picks it up and runs the research pipeline.
+export async function createResearchJob(userId) {
+  const ref = await adminDb.collection("pending_jobs").add({
+    userId,
+    type: "research",
+    status: "queued",
+    error: null,
+    completedAt: null,
+    createdAt: FieldValue.serverTimestamp(),
+    scheduledRun: false,
+  });
+  return ref.id;
+}
+
+// New in Phase 2: is there a research job already running/queued?
+// Used by the API route to prevent duplicate manual triggers.
+export async function hasActiveResearchJob(userId) {
+  const snap = await adminDb.collection("pending_jobs")
+    .where("userId", "==", userId)
+    .where("type", "==", "research")
+    .where("status", "in", ["queued", "processing"])
+    .limit(1)
+    .get();
+  return !snap.empty;
 }
 
 export async function listDrafts(userId, { status, platform, limit = 100 } = {}) {
