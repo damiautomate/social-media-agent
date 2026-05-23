@@ -283,6 +283,25 @@ export default function SettingsPage() {
           {keyMsg.err ? <div style={styles.err}>{keyMsg.err}</div> : null}
         </div>
 
+        <div
+          style={{
+            ...styles.section,
+            background: "linear-gradient(135deg, #1e1b4b 0%, #2e1065 100%)",
+            border: "1px solid #4c1d95",
+          }}
+        >
+          <h2 style={{ ...styles.h2, marginBottom: 6 }}>✨ Auto-fill from your existing content</h2>
+          <p style={{ color: "#c4b5fd", fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
+            Paste your bio and a few representative posts — the AI will propose your identity, voice, signature phrases, and content pillars. Saves you from filling out the sections below by hand.
+          </p>
+          <button
+            style={{ ...styles.primary, backgroundColor: "#a78bfa", color: "#1e1b4b" }}
+            onClick={() => router.push("/bootstrap")}
+          >
+            Open Brand Bootstrap →
+          </button>
+        </div>
+
         <div style={styles.section}>
           <h2 style={styles.h2}>Brand Identity</h2>
           <label style={styles.label}>Display name</label>

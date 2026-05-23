@@ -10,6 +10,7 @@ const {
   buildUserPrompt,
 } = require("./lib/prompt-builder.js");
 const { runResearch } = require("./lib/research/pipeline.js");
+const { runBootstrap } = require("./lib/bootstrap/analyzer.js");
 
 if (!getApps().length) initializeApp();
 
@@ -17,7 +18,7 @@ setGlobalOptions({ region: "us-central1", maxInstances: 10 });
 
 const db = getFirestore();
 
-// ----- Loaders shared by draft + research jobs ---------------------------
+// ----- Shared loaders ---------------------------------------------------
 
 async function loadUserApiKey(userId) {
   const userSnap = await db.collection("users").doc(userId).get();
@@ -36,7 +37,7 @@ async function loadBrandConfig(userId) {
   return cfgSnap.data();
 }
 
-// ----- Draft job (existing Phase 1 behavior, unchanged logic) ------------
+// ----- Draft job (Phase 1) ----------------------------------------------
 
 async function handleDraftJob(job, jobId) {
   const apiKey = await loadUserApiKey(job.userId);
@@ -92,7 +93,7 @@ async function handleDraftJob(job, jobId) {
   return { resultDraftId: draftRef.id };
 }
 
-// ----- Research job (new in Phase 2) ------------------------------------
+// ----- Research job (Phase 2) -------------------------------------------
 
 async function handleResearchJob(job, jobId) {
   const apiKey = await loadUserApiKey(job.userId);
@@ -115,6 +116,43 @@ async function handleResearchJob(job, jobId) {
       errorCount: (summary.errors || []).length,
       errors: summary.errors,
       note: summary.note || null,
+    },
+  };
+}
+
+// ----- Bootstrap job (Phase 3a) -----------------------------------------
+// Reads input from the job doc itself (bio, postsBlob, youtubeChannelId,
+// userNotes). Writes the proposed brand profile to a singleton doc at
+// bootstrap_proposals/{userId}, which the UI subscribes to.
+
+async function handleBootstrapJob(job, jobId) {
+  const apiKey = await loadUserApiKey(job.userId);
+
+  const { proposal, inputSummary, tokensUsed } = await runBootstrap({
+    apiKey,
+    bio: job.bio || "",
+    postsBlob: job.postsBlob || "",
+    youtubeChannelId: job.youtubeChannelId || "",
+    userNotes: job.userNotes || "",
+  });
+
+  await db.collection("bootstrap_proposals").doc(job.userId).set({
+    userId: job.userId,
+    jobId,
+    status: "pending",  // pending | applied | dismissed
+    proposal,
+    inputSummary,
+    tokensUsed,
+    createdAt: FieldValue.serverTimestamp(),
+    reviewedAt: null,
+  });
+
+  return {
+    bootstrapSummary: {
+      tokensUsed,
+      pillarsProposed: proposal.contentPillars.length,
+      samplePostsProposed: proposal.voice.samplePosts.length,
+      ...inputSummary,
     },
   };
 }
@@ -153,6 +191,8 @@ exports.processPendingJob = onDocumentCreated(
         result = await handleDraftJob(job, jobId);
       } else if (jobType === "research") {
         result = await handleResearchJob(job, jobId);
+      } else if (jobType === "bootstrap") {
+        result = await handleBootstrapJob(job, jobId);
       } else {
         throw new Error(`Unknown job type: ${jobType}`);
       }
@@ -174,13 +214,10 @@ exports.processPendingJob = onDocumentCreated(
 );
 
 // ----- Scheduled weekly research run ------------------------------------
-// Runs every Monday at 06:00 UTC. For each user with research enabled
-// (or unset, defaulting to enabled), creates a pending_jobs doc of
-// type "research". The processor above picks it up and runs in parallel.
 
 exports.runWeeklyResearch = onSchedule(
   {
-    schedule: "0 6 * * 1", // Mon 06:00
+    schedule: "0 6 * * 1",
     timeZone: "Etc/UTC",
     region: "us-central1",
     timeoutSeconds: 300,
@@ -203,10 +240,8 @@ exports.runWeeklyResearch = onSchedule(
       if (!cfgSnap.exists) { skipped++; continue; }
 
       const research = cfgSnap.data().research;
-      // Opt-out, not opt-in: missing research config means use defaults (enabled).
       if (research && research.enabled === false) { skipped++; continue; }
 
-      // Don't pile up jobs: skip if there's already a queued/processing research job for this user.
       const existing = await db.collection("pending_jobs")
         .where("userId", "==", userDoc.id)
         .where("type", "==", "research")

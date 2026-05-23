@@ -7,24 +7,29 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
 
-      // Brand config lives as a subcollection under the user.
       match /brandConfig/{configDoc} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
     }
 
-    // Drafts: read-your-own-rows for live dashboard updates.
-    // All writes are server-only via Admin SDK.
+    // Drafts: read-your-own-rows. All writes server-only via Admin SDK.
     match /drafts/{draftId} {
       allow read: if request.auth != null
                   && resource.data.userId == request.auth.uid;
       allow write: if false;
     }
 
-    // Ideas: same pattern as drafts.
+    // Ideas: same pattern.
     match /ideas/{ideaId} {
       allow read: if request.auth != null
                   && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // Bootstrap proposals are a singleton per user keyed by userId.
+    // User reads their own; only the Cloud Function writes/updates.
+    match /bootstrap_proposals/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
       allow write: if false;
     }
 
