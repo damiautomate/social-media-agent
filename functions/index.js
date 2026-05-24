@@ -12,6 +12,7 @@ const {
 const { runResearch } = require("./lib/research/pipeline.js");
 const { runBootstrap } = require("./lib/bootstrap/analyzer.js");
 const { runImageGeneration } = require("./lib/images/pipeline.js");
+const { runAvatarVideo } = require("./lib/avatar/pipeline.js");
 
 if (!getApps().length) initializeApp();
 
@@ -205,6 +206,53 @@ async function handleImagesJob(job, jobId) {
   };
 }
 
+// ----- Avatar video job (Phase 3c.1) ------------------------------------
+// Reads draftId from job body. Scriptifies the post via Claude, submits to
+// HeyGen with the user's avatar+voice, polls until ready, mirrors to
+// Cloudinary, updates the draft doc with the final video URL.
+
+async function handleAvatarVideoJob(job, jobId) {
+  const userSnap = await db.collection("users").doc(job.userId).get();
+  if (!userSnap.exists) throw new Error("User not found");
+  const u = userSnap.data();
+
+  if (!u.anthropicApiKey) throw new Error("Anthropic API key not configured");
+  if (!u.heygenApiKey) throw new Error("HeyGen API key not configured");
+  const c = u.cloudinary || {};
+  if (!c.cloudName || !c.apiKey || !c.apiSecret) {
+    throw new Error("Cloudinary credentials not configured");
+  }
+
+  const brandConfig = await loadBrandConfig(job.userId);
+
+  const result = await runAvatarVideo({
+    db,
+    userId: job.userId,
+    jobId,
+    draftId: job.draftId,
+    brandConfig,
+    apiKeys: {
+      anthropic: u.anthropicApiKey,
+      heygen: u.heygenApiKey,
+      cloudinaryCloud: c.cloudName,
+      cloudinaryKey: c.apiKey,
+      cloudinarySecret: c.apiSecret,
+      cloudinaryFolder: c.folder || null,
+    },
+  });
+
+  return {
+    avatarVideoSummary: {
+      draftId: job.draftId,
+      heygenVideoId: result.videoId,
+      duration: result.duration,
+      wordCount: result.wordCount,
+      tokensUsed: result.tokensUsed,
+      cloudinaryUrl: result.cloudinaryUrl,
+    },
+  };
+}
+
 // ----- Unified pending-job processor ------------------------------------
 
 exports.processPendingJob = onDocumentCreated(
@@ -243,6 +291,8 @@ exports.processPendingJob = onDocumentCreated(
         result = await handleBootstrapJob(job, jobId);
       } else if (jobType === "images") {
         result = await handleImagesJob(job, jobId);
+      } else if (jobType === "avatar_video") {
+        result = await handleAvatarVideoJob(job, jobId);
       } else {
         throw new Error(`Unknown job type: ${jobType}`);
       }

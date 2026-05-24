@@ -168,6 +168,13 @@ export const DEFAULT_BRAND_TEMPLATE = {
     ],
     referenceUrls: [],
   },
+  // ---- Phase 3c.1: Avatar video config ----
+  // Set the avatar/voice in Settings → HeyGen after pasting your API key.
+  videoStyle: {
+    // avatar: { avatarId: "...", avatarType: "avatar" | "talking_photo", voiceId: "..." }
+    avatar: null,
+    backgroundColor: "#0F1B2D",
+  },
   // ---- Phase 2: Research Agent ----
   // Auto-populates the ideas bank weekly (and on-demand) from real-world signals.
   research: {

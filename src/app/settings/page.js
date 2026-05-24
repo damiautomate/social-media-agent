@@ -174,6 +174,16 @@ export default function SettingsPage() {
   const [cloudinaryInput, setCloudinaryInput] = useState({ cloudName: "", apiKey: "", apiSecret: "", folder: "social-agent" });
   const [cloudinaryMsg, setCloudinaryMsg] = useState({ ok: "", err: "" });
 
+  // HeyGen
+  const [heygenMasked, setHeygenMasked] = useState(null);
+  const [hasHeygenKey, setHasHeygenKey] = useState(false);
+  const [heygenInput, setHeygenInput] = useState("");
+  const [heygenMsg, setHeygenMsg] = useState({ ok: "", err: "" });
+  const [heygenAvatars, setHeygenAvatars] = useState([]);
+  const [heygenVoices, setHeygenVoices] = useState([]);
+  const [heygenSelected, setHeygenSelected] = useState({ avatarId: "", avatarType: "avatar", voiceId: "" });
+  const [heygenLoadingMeta, setHeygenLoadingMeta] = useState(false);
+
   const [savedMsg, setSavedMsg] = useState({ ok: "", err: "" });
   const [busy, setBusy] = useState(false);
 
@@ -185,17 +195,20 @@ export default function SettingsPage() {
       }
       setUser(u);
       const token = await u.getIdToken();
-      const [cfg, key, oaiKey, cloud] = await Promise.all([
+      const [cfg, key, oaiKey, cloud, hgKey] = await Promise.all([
         fetch("/api/brand-config", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
         fetch("/api/api-key", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
         fetch("/api/openai-key", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => ({})),
         fetch("/api/cloudinary-keys", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/heygen-key", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => ({})),
       ]);
       setConfig(cfg.brandConfig || null);
       setHasKey(!!key.hasKey);
       setMaskedKey(key.masked);
       setHasOpenaiKey(!!oaiKey.hasKey);
       setOpenaiMasked(oaiKey.masked);
+      setHasHeygenKey(!!hgKey.hasKey);
+      setHeygenMasked(hgKey.masked);
       setCloudinaryInfo({
         hasCreds: !!cloud.hasCreds,
         cloudName: cloud.cloudName || "",
@@ -204,6 +217,15 @@ export default function SettingsPage() {
       });
       if (cloud.cloudName) {
         setCloudinaryInput((s) => ({ ...s, cloudName: cloud.cloudName, folder: cloud.folder || "social-agent" }));
+      }
+      // Prefill HeyGen avatar/voice selection from brandConfig
+      const av = cfg.brandConfig?.videoStyle?.avatar;
+      if (av) {
+        setHeygenSelected({
+          avatarId: av.avatarId || "",
+          avatarType: av.avatarType || "avatar",
+          voiceId: av.voiceId || "",
+        });
       }
     });
     return unsub;
@@ -296,6 +318,72 @@ export default function SettingsPage() {
       setCloudinaryMsg({ ok: "Verified and saved.", err: "" });
     } else {
       setCloudinaryMsg({ ok: "", err: data.error + (data.detail ? `: ${data.detail}` : "") });
+    }
+  }
+
+  async function saveHeygenKey() {
+    setHeygenMsg({ ok: "", err: "" });
+    setBusy(true);
+    const res = await authedFetch("/api/heygen-key", {
+      method: "POST",
+      body: JSON.stringify({ apiKey: heygenInput }),
+    });
+    setBusy(false);
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setHasHeygenKey(true);
+      setHeygenMasked(data.masked);
+      setHeygenInput("");
+      setHeygenMsg({ ok: "Verified and saved. Load your avatars below.", err: "" });
+    } else {
+      setHeygenMsg({ ok: "", err: data.error + (data.detail ? `: ${data.detail}` : "") });
+    }
+  }
+
+  async function loadHeygenMeta() {
+    setHeygenMsg({ ok: "", err: "" });
+    setHeygenLoadingMeta(true);
+    const res = await authedFetch("/api/heygen-meta");
+    setHeygenLoadingMeta(false);
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setHeygenAvatars(data.avatars || []);
+      setHeygenVoices(data.voices || []);
+      if (data.selected?.avatarId) {
+        setHeygenSelected({
+          avatarId: data.selected.avatarId,
+          avatarType: data.selected.avatarType || "avatar",
+          voiceId: data.selected.voiceId,
+        });
+      }
+    } else {
+      setHeygenMsg({ ok: "", err: data.error || "Failed to load avatars/voices" });
+    }
+  }
+
+  async function saveHeygenSelection() {
+    if (!heygenSelected.avatarId || !heygenSelected.voiceId) {
+      setHeygenMsg({ ok: "", err: "Pick an avatar AND a voice first" });
+      return;
+    }
+    setBusy(true);
+    const res = await authedFetch("/api/heygen-meta", {
+      method: "PUT",
+      body: JSON.stringify({
+        avatarId: heygenSelected.avatarId,
+        avatarType: heygenSelected.avatarType,
+        voiceId: heygenSelected.voiceId,
+        backgroundColor: config.videoStyle?.backgroundColor || "#0F1B2D",
+      }),
+    });
+    setBusy(false);
+    if (res.ok) {
+      const data = await res.json();
+      setConfig({ ...config, videoStyle: data.videoStyle });
+      setHeygenMsg({ ok: "Avatar and voice saved.", err: "" });
+    } else {
+      const data = await res.json().catch(() => ({}));
+      setHeygenMsg({ ok: "", err: data.error || "Save failed" });
     }
   }
 
@@ -428,6 +516,99 @@ export default function SettingsPage() {
           </div>
           {cloudinaryMsg.ok ? <div style={styles.ok}>{cloudinaryMsg.ok}</div> : null}
           {cloudinaryMsg.err ? <div style={styles.err}>{cloudinaryMsg.err}</div> : null}
+        </div>
+
+        <div style={styles.section}>
+          <h2 style={styles.h2}>HeyGen (Avatar Video)</h2>
+          <div style={{ color: "#a1a1aa", fontSize: 13, lineHeight: 1.6 }}>
+            Powers AI avatar video generation. Get a key at{" "}
+            <a href="https://app.heygen.com/settings?nav=API" target="_blank" rel="noopener noreferrer" style={{ color: "#a78bfa" }}>
+              app.heygen.com/settings → API
+            </a>. {hasHeygenKey ? `Current: ${heygenMasked}` : "No key on file."}
+            <br />
+            <strong style={{ color: "#e4e4e7" }}>One-time setup:</strong> Create your avatar at{" "}
+            <a href="https://app.heygen.com/avatars" target="_blank" rel="noopener noreferrer" style={{ color: "#a78bfa" }}>app.heygen.com/avatars</a>{" "}
+            (record 2-5 min of yourself, wait for training). Then come back here and load your avatars below.
+          </div>
+          <label style={styles.label}>HeyGen API key</label>
+          <input
+            type="password"
+            placeholder="paste your key"
+            value={heygenInput}
+            onChange={(e) => setHeygenInput(e.target.value)}
+            style={styles.input}
+          />
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button style={styles.primary} disabled={busy || !heygenInput} onClick={saveHeygenKey}>
+              {busy ? "Verifying..." : "Test and save"}
+            </button>
+            {hasHeygenKey ? (
+              <button style={styles.ghost || styles.primary} disabled={heygenLoadingMeta} onClick={loadHeygenMeta}>
+                {heygenLoadingMeta ? "Loading…" : "Load my avatars + voices"}
+              </button>
+            ) : null}
+          </div>
+
+          {heygenAvatars.length > 0 ? (
+            <div style={{ marginTop: 16 }}>
+              <label style={styles.label}>Pick your avatar ({heygenAvatars.length} available)</label>
+              <select
+                style={styles.input}
+                value={heygenSelected.avatarId}
+                onChange={(e) => {
+                  const a = heygenAvatars.find((x) => x.id === e.target.value);
+                  setHeygenSelected({
+                    avatarId: e.target.value,
+                    avatarType: a?.type || "avatar",
+                    voiceId: heygenSelected.voiceId,
+                  });
+                }}
+              >
+                <option value="">— select avatar —</option>
+                {heygenAvatars.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.type === "talking_photo" ? "photo avatar" : "avatar"})
+                  </option>
+                ))}
+              </select>
+              {heygenSelected.avatarId ? (() => {
+                const a = heygenAvatars.find((x) => x.id === heygenSelected.avatarId);
+                return a?.preview ? (
+                  <img src={a.preview} alt={a.name}
+                       style={{ marginTop: 8, maxWidth: 160, borderRadius: 8, border: "1px solid #27272a" }} />
+                ) : null;
+              })() : null}
+            </div>
+          ) : null}
+
+          {heygenVoices.length > 0 ? (
+            <div style={{ marginTop: 12 }}>
+              <label style={styles.label}>Pick a voice ({heygenVoices.length} available)</label>
+              <select
+                style={styles.input}
+                value={heygenSelected.voiceId}
+                onChange={(e) => setHeygenSelected({ ...heygenSelected, voiceId: e.target.value })}
+              >
+                <option value="">— select voice —</option>
+                {heygenVoices.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}{v.language ? ` · ${v.language}` : ""}{v.gender ? ` · ${v.gender}` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+
+          {heygenAvatars.length > 0 ? (
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button style={styles.primary} disabled={busy} onClick={saveHeygenSelection}>
+                Save avatar + voice
+              </button>
+            </div>
+          ) : null}
+
+          {heygenMsg.ok ? <div style={styles.ok}>{heygenMsg.ok}</div> : null}
+          {heygenMsg.err ? <div style={styles.err}>{heygenMsg.err}</div> : null}
         </div>
 
         <div style={styles.section}>

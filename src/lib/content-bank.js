@@ -75,6 +75,13 @@ export async function setOpenaiApiKey(userId, apiKey) {
   });
 }
 
+export async function setHeygenApiKey(userId, apiKey) {
+  await userRef(userId).update({
+    heygenApiKey: apiKey,
+    lastActiveAt: FieldValue.serverTimestamp(),
+  });
+}
+
 export async function setCloudinaryKeys(userId, { cloudName, apiKey, apiSecret, folder }) {
   await userRef(userId).update({
     cloudinary: {

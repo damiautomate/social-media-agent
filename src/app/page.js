@@ -208,6 +208,32 @@ const styles = {
     borderRadius: 6,
     border: "1px solid #7f1d1d",
   },
+  btnAvatarVideo: {
+    padding: "6px 12px",
+    backgroundColor: "#0c4a6e",
+    color: "#bae6fd",
+    border: "1px solid #075985",
+    borderRadius: 6,
+    cursor: "pointer",
+    fontSize: 12,
+  },
+  videoBox: {
+    marginTop: 12,
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  },
+  videoPlayer: {
+    maxWidth: 280,
+    width: "100%",
+    borderRadius: 10,
+    border: "1px solid #27272a",
+    backgroundColor: "#09090b",
+  },
+  videoMeta: {
+    color: "#71717a",
+    fontSize: 11,
+  },
   empty: {
     textAlign: "center",
     padding: 40,
@@ -392,6 +418,17 @@ export default function Dashboard() {
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       alert(data.error || "Failed to start image generation");
+    }
+  }
+
+  async function generateAvatarVideo(draftId) {
+    const res = await authedFetch("/api/avatar-video/generate", {
+      method: "POST",
+      body: JSON.stringify({ draftId }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Failed to start avatar video generation");
     }
   }
 
@@ -588,6 +625,40 @@ export default function Dashboard() {
                 </div>
               ) : null}
 
+              {d.avatarVideoStatus === "generating" ? (
+                <div style={styles.imagesPending}>
+                  Generating avatar video… typically 1-3 minutes (scriptify → HeyGen render → Cloudinary mirror)
+                </div>
+              ) : null}
+
+              {d.avatarVideoStatus === "failed" ? (
+                <div style={styles.imagesError}>
+                  Avatar video failed: {d.avatarVideoError || "unknown error"}
+                </div>
+              ) : null}
+
+              {d.avatarVideoStatus === "ready" && d.avatarVideoUrl ? (
+                <div style={styles.videoBox}>
+                  <video
+                    src={d.avatarVideoUrl}
+                    poster={d.avatarVideoThumbnailUrl || undefined}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    style={styles.videoPlayer}
+                  />
+                  <div style={styles.videoMeta}>
+                    {d.avatarVideoDuration ? `${Math.round(d.avatarVideoDuration)}s` : ""}
+                    {d.avatarVideoScriptWordCount ? ` · ${d.avatarVideoScriptWordCount} words` : ""}
+                    {d.avatarVideoScriptHook ? ` · hook: ${d.avatarVideoScriptHook}` : ""}
+                    {" · "}
+                    <a href={d.avatarVideoUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#a78bfa" }}>
+                      open / download
+                    </a>
+                  </div>
+                </div>
+              ) : null}
+
               <div style={styles.actions}>
                 <button
                   style={styles.btnApprove}
@@ -608,6 +679,19 @@ export default function Dashboard() {
                       : (Array.isArray(d.images) && d.images.length > 0)
                         ? "Regenerate images"
                         : "Generate images"}
+                  </button>
+                ) : null}
+                {d.formatType !== "document" ? (
+                  <button
+                    style={styles.btnAvatarVideo}
+                    onClick={() => generateAvatarVideo(d.id)}
+                    disabled={d.avatarVideoStatus === "generating"}
+                  >
+                    {d.avatarVideoStatus === "generating"
+                      ? "Generating video…"
+                      : d.avatarVideoStatus === "ready"
+                        ? "Regenerate video"
+                        : "Generate avatar video"}
                   </button>
                 ) : null}
               </div>
