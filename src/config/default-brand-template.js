@@ -168,12 +168,18 @@ export const DEFAULT_BRAND_TEMPLATE = {
     ],
     referenceUrls: [],
   },
-  // ---- Phase 3c.1: Avatar video config ----
-  // Set the avatar/voice in Settings → HeyGen after pasting your API key.
+  // ---- Phase 3c.1+3c.2: Avatar + B-roll video config ----
   videoStyle: {
-    // avatar: { avatarId: "...", avatarType: "avatar" | "talking_photo", voiceId: "..." }
+    // Avatar (3c.1) — talking head delivery
     avatar: null,
     backgroundColor: "#0F1B2D",
+    // B-roll (3c.2) — fal.ai scene generation
+    broll: {
+      modelId: "kling-2.6-pro",      // see functions/lib/broll/models.js for full list
+      duration: "5",                  // 5s default — most models support 5 or 10
+      defaultMode: "single",          // "single" or "storyboard"
+      storyboardClipCount: 3,         // 2-5 clips in storyboard mode
+    },
   },
   // ---- Phase 2: Research Agent ----
   // Auto-populates the ideas bank weekly (and on-demand) from real-world signals.

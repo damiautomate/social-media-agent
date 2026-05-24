@@ -13,6 +13,7 @@ const { runResearch } = require("./lib/research/pipeline.js");
 const { runBootstrap } = require("./lib/bootstrap/analyzer.js");
 const { runImageGeneration } = require("./lib/images/pipeline.js");
 const { runAvatarVideo } = require("./lib/avatar/pipeline.js");
+const { runBrollGeneration } = require("./lib/broll/pipeline.js");
 
 if (!getApps().length) initializeApp();
 
@@ -253,6 +254,56 @@ async function handleAvatarVideoJob(job, jobId) {
   };
 }
 
+// ----- B-roll generation job (Phase 3c.2) -------------------------------
+// Generates scene B-roll clips via fal.ai (Kling/Veo). Mode: "single" (1 clip)
+// or "storyboard" (3-5 clips forming a narrative arc).
+
+async function handleBrollJob(job, jobId) {
+  const userSnap = await db.collection("users").doc(job.userId).get();
+  if (!userSnap.exists) throw new Error("User not found");
+  const u = userSnap.data();
+
+  if (!u.anthropicApiKey) throw new Error("Anthropic API key not configured");
+  if (!u.falaiApiKey) throw new Error("fal.ai API key not configured");
+  const c = u.cloudinary || {};
+  if (!c.cloudName || !c.apiKey || !c.apiSecret) {
+    throw new Error("Cloudinary credentials not configured");
+  }
+
+  const brandConfig = await loadBrandConfig(job.userId);
+
+  const result = await runBrollGeneration({
+    db,
+    userId: job.userId,
+    jobId,
+    draftId: job.draftId,
+    mode: job.mode || "single",
+    clipCount: job.clipCount || (job.mode === "storyboard" ? 3 : 1),
+    brandConfig,
+    apiKeys: {
+      anthropic: u.anthropicApiKey,
+      falai: u.falaiApiKey,
+      cloudinaryCloud: c.cloudName,
+      cloudinaryKey: c.apiKey,
+      cloudinarySecret: c.apiSecret,
+      cloudinaryFolder: c.folder || null,
+    },
+  });
+
+  return {
+    brollSummary: {
+      draftId: job.draftId,
+      mode: job.mode,
+      clipsCreated: result.clipsCreated,
+      clipsFailed: result.clipsFailed,
+      modelId: result.modelId,
+      aspect: result.aspectRatio,
+      duration: result.duration,
+      tokensUsed: result.tokensUsed,
+    },
+  };
+}
+
 // ----- Unified pending-job processor ------------------------------------
 
 exports.processPendingJob = onDocumentCreated(
@@ -293,6 +344,8 @@ exports.processPendingJob = onDocumentCreated(
         result = await handleImagesJob(job, jobId);
       } else if (jobType === "avatar_video") {
         result = await handleAvatarVideoJob(job, jobId);
+      } else if (jobType === "broll") {
+        result = await handleBrollJob(job, jobId);
       } else {
         throw new Error(`Unknown job type: ${jobType}`);
       }

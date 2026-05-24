@@ -184,6 +184,12 @@ export default function SettingsPage() {
   const [heygenSelected, setHeygenSelected] = useState({ avatarId: "", avatarType: "avatar", voiceId: "" });
   const [heygenLoadingMeta, setHeygenLoadingMeta] = useState(false);
 
+  // fal.ai (B-roll)
+  const [falaiMasked, setFalaiMasked] = useState(null);
+  const [hasFalaiKey, setHasFalaiKey] = useState(false);
+  const [falaiInput, setFalaiInput] = useState("");
+  const [falaiMsg, setFalaiMsg] = useState({ ok: "", err: "" });
+
   const [savedMsg, setSavedMsg] = useState({ ok: "", err: "" });
   const [busy, setBusy] = useState(false);
 
@@ -195,12 +201,13 @@ export default function SettingsPage() {
       }
       setUser(u);
       const token = await u.getIdToken();
-      const [cfg, key, oaiKey, cloud, hgKey] = await Promise.all([
+      const [cfg, key, oaiKey, cloud, hgKey, falKey] = await Promise.all([
         fetch("/api/brand-config", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
         fetch("/api/api-key", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
         fetch("/api/openai-key", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => ({})),
         fetch("/api/cloudinary-keys", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => ({})),
         fetch("/api/heygen-key", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/falai-key", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => ({})),
       ]);
       setConfig(cfg.brandConfig || null);
       setHasKey(!!key.hasKey);
@@ -209,6 +216,8 @@ export default function SettingsPage() {
       setOpenaiMasked(oaiKey.masked);
       setHasHeygenKey(!!hgKey.hasKey);
       setHeygenMasked(hgKey.masked);
+      setHasFalaiKey(!!falKey.hasKey);
+      setFalaiMasked(falKey.masked);
       setCloudinaryInfo({
         hasCreds: !!cloud.hasCreds,
         cloudName: cloud.cloudName || "",
@@ -385,6 +394,38 @@ export default function SettingsPage() {
       const data = await res.json().catch(() => ({}));
       setHeygenMsg({ ok: "", err: data.error || "Save failed" });
     }
+  }
+
+  async function saveFalaiKey() {
+    setFalaiMsg({ ok: "", err: "" });
+    setBusy(true);
+    const res = await authedFetch("/api/falai-key", {
+      method: "POST",
+      body: JSON.stringify({ apiKey: falaiInput }),
+    });
+    setBusy(false);
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setHasFalaiKey(true);
+      setFalaiMasked(data.masked);
+      setFalaiInput("");
+      setFalaiMsg({ ok: "Verified and saved.", err: "" });
+    } else {
+      setFalaiMsg({ ok: "", err: data.error + (data.detail ? `: ${data.detail}` : "") });
+    }
+  }
+
+  function updateBroll(field, value) {
+    setConfig({
+      ...config,
+      videoStyle: {
+        ...(config.videoStyle || {}),
+        broll: {
+          ...(config.videoStyle?.broll || { modelId: "kling-2.6-pro", duration: "5", defaultMode: "single", storyboardClipCount: 3 }),
+          [field]: value,
+        },
+      },
+    });
   }
 
   if (!user || !config) {
@@ -609,6 +650,78 @@ export default function SettingsPage() {
 
           {heygenMsg.ok ? <div style={styles.ok}>{heygenMsg.ok}</div> : null}
           {heygenMsg.err ? <div style={styles.err}>{heygenMsg.err}</div> : null}
+        </div>
+
+        <div style={styles.section}>
+          <h2 style={styles.h2}>fal.ai (B-roll Scenes)</h2>
+          <div style={{ color: "#a1a1aa", fontSize: 13, lineHeight: 1.6 }}>
+            Powers scene B-roll generation (Kling, Veo, Seedance — one API for all). Get a key at{" "}
+            <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener noreferrer" style={{ color: "#a78bfa" }}>
+              fal.ai/dashboard/keys
+            </a>. {hasFalaiKey ? `Current: ${falaiMasked}` : "No key on file."} Pay-as-you-go ~$0.05-$0.40/sec depending on model.
+          </div>
+          <label style={styles.label}>fal.ai API key</label>
+          <input
+            type="password"
+            placeholder="paste your key"
+            value={falaiInput}
+            onChange={(e) => setFalaiInput(e.target.value)}
+            style={styles.input}
+          />
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button style={styles.primary} disabled={busy || !falaiInput} onClick={saveFalaiKey}>
+              {busy ? "Verifying..." : "Test and save"}
+            </button>
+          </div>
+          {falaiMsg.ok ? <div style={styles.ok}>{falaiMsg.ok}</div> : null}
+          {falaiMsg.err ? <div style={styles.err}>{falaiMsg.err}</div> : null}
+
+          <label style={styles.label}>B-roll model</label>
+          <select
+            style={styles.input}
+            value={config.videoStyle?.broll?.modelId || "kling-2.6-pro"}
+            onChange={(e) => updateBroll("modelId", e.target.value)}
+          >
+            <option value="kling-2.6-pro">Kling 2.6 Pro — ~$0.10/sec (recommended, native audio)</option>
+            <option value="kling-2.5-turbo-pro">Kling 2.5 Turbo Pro — ~$0.07/sec (faster)</option>
+            <option value="kling-2.1-standard">Kling 2.1 Standard — ~$0.05/sec (cheapest)</option>
+            <option value="veo3-fast">Veo 3 Fast — ~$0.15/sec (top quality cheap tier)</option>
+            <option value="veo3-standard">Veo 3 Standard — ~$0.40/sec (hero quality, slow)</option>
+          </select>
+
+          <label style={styles.label}>Clip duration (seconds)</label>
+          <select
+            style={styles.input}
+            value={config.videoStyle?.broll?.duration || "5"}
+            onChange={(e) => updateBroll("duration", e.target.value)}
+          >
+            <option value="5">5s — standard hook clip</option>
+            <option value="8">8s — Veo 3 native length</option>
+            <option value="10">10s — long Kling clip</option>
+          </select>
+
+          <label style={styles.label}>Default mode when clicking "Generate B-roll"</label>
+          <select
+            style={styles.input}
+            value={config.videoStyle?.broll?.defaultMode || "single"}
+            onChange={(e) => updateBroll("defaultMode", e.target.value)}
+          >
+            <option value="single">Single clip (1 scene)</option>
+            <option value="storyboard">Storyboard (multiple scenes — set count below)</option>
+          </select>
+
+          <label style={styles.label}>Storyboard clip count (2-5)</label>
+          <input
+            type="number"
+            min="2"
+            max="5"
+            style={styles.input}
+            value={config.videoStyle?.broll?.storyboardClipCount || 3}
+            onChange={(e) => updateBroll("storyboardClipCount", Math.min(Math.max(Number(e.target.value), 2), 5))}
+          />
+          <div style={{ color: "#71717a", fontSize: 11, marginTop: 4 }}>
+            Click "Save visual style" at the bottom to persist these changes.
+          </div>
         </div>
 
         <div style={styles.section}>

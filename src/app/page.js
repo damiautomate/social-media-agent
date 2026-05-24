@@ -217,6 +217,38 @@ const styles = {
     cursor: "pointer",
     fontSize: 12,
   },
+  btnBroll: {
+    padding: "6px 12px",
+    backgroundColor: "#3f1d61",
+    color: "#e9d5ff",
+    border: "1px solid #6d28d9",
+    borderRadius: 6,
+    cursor: "pointer",
+    fontSize: 12,
+  },
+  brollGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: 10,
+    marginTop: 12,
+  },
+  brollClipCard: {
+    backgroundColor: "#09090b",
+    borderRadius: 8,
+    border: "1px solid #27272a",
+    overflow: "hidden",
+  },
+  brollClipVideo: {
+    width: "100%",
+    display: "block",
+    backgroundColor: "#000",
+  },
+  brollClipMeta: {
+    padding: "6px 10px",
+    color: "#a1a1aa",
+    fontSize: 11,
+    lineHeight: 1.4,
+  },
   videoBox: {
     marginTop: 12,
     display: "flex",
@@ -429,6 +461,18 @@ export default function Dashboard() {
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       alert(data.error || "Failed to start avatar video generation");
+    }
+  }
+
+  async function generateBroll(draftId, mode) {
+    // mode: "single" | "storyboard". Storyboard count comes from brandConfig.
+    const res = await authedFetch("/api/broll/generate", {
+      method: "POST",
+      body: JSON.stringify({ draftId, mode }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Failed to start B-roll generation");
     }
   }
 
@@ -659,6 +703,43 @@ export default function Dashboard() {
                 </div>
               ) : null}
 
+              {d.brollStatus === "generating" ? (
+                <div style={styles.imagesPending}>
+                  Generating B-roll{d.brollMode === "storyboard" ? " storyboard" : " clip"}…
+                  typically 1-3 min per clip via {d.brollModelId || "fal.ai"}.
+                </div>
+              ) : null}
+
+              {d.brollStatus === "failed" || d.brollStatus === "partial" ? (
+                <div style={styles.imagesError}>
+                  {d.brollStatus === "partial" ? "Some B-roll clips failed: " : "B-roll failed: "}
+                  {d.brollError || "unknown error"}
+                </div>
+              ) : null}
+
+              {Array.isArray(d.brollClips) && d.brollClips.length > 0 ? (
+                <div style={styles.brollGrid}>
+                  {d.brollClips.map((c, i) => (
+                    <div key={c.slot || i} style={styles.brollClipCard}>
+                      <video
+                        src={c.url}
+                        controls
+                        playsInline
+                        preload="metadata"
+                        style={styles.brollClipVideo}
+                      />
+                      <div style={styles.brollClipMeta}>
+                        <strong>{c.slot}</strong>{c.duration ? ` · ${c.duration}s` : ""}
+                        {c.intent ? <div style={{ marginTop: 2, fontStyle: "italic" }}>{c.intent}</div> : null}
+                        <div style={{ marginTop: 4 }}>
+                          <a href={c.url} target="_blank" rel="noopener noreferrer" style={{ color: "#a78bfa" }}>open</a>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
               <div style={styles.actions}>
                 <button
                   style={styles.btnApprove}
@@ -693,6 +774,30 @@ export default function Dashboard() {
                         ? "Regenerate video"
                         : "Generate avatar video"}
                   </button>
+                ) : null}
+                {d.formatType !== "document" ? (
+                  <>
+                    <button
+                      style={styles.btnBroll}
+                      onClick={() => generateBroll(d.id, "single")}
+                      disabled={d.brollStatus === "generating"}
+                      title="One ~5s B-roll scene clip via fal.ai (Kling/Veo)"
+                    >
+                      {d.brollStatus === "generating" && d.brollMode === "single"
+                        ? "Generating clip…"
+                        : "B-roll clip"}
+                    </button>
+                    <button
+                      style={styles.btnBroll}
+                      onClick={() => generateBroll(d.id, "storyboard")}
+                      disabled={d.brollStatus === "generating"}
+                      title="Multiple B-roll scenes forming a narrative arc (3-5 clips). More cost."
+                    >
+                      {d.brollStatus === "generating" && d.brollMode === "storyboard"
+                        ? "Generating storyboard…"
+                        : "Storyboard"}
+                    </button>
+                  </>
                 ) : null}
               </div>
             </div>
