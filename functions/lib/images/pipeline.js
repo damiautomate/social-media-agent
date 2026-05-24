@@ -63,20 +63,26 @@ async function runImageGeneration({ db, userId, jobId, draftId, brandConfig, api
       return { imagesCreated: 0, note: "No slots", tokensUsed };
     }
 
+    // Image quality is driven by brandConfig.visualStyle.imageQuality; falls
+    // back to "medium" — the sweet spot for social media (~$0.053/image).
+    const imageQuality =
+      (brandConfig.visualStyle && brandConfig.visualStyle.imageQuality) || "medium";
+
     // 3. Generate + upload each slot in parallel (max 3 concurrent)
     const folder = `${(apiKeys.cloudinaryFolder || "social-agent")}/drafts/${draftId}`;
 
     const slotResults = await mapWithConcurrency(prompts, 3, async (p) => {
       const gen = await generateImage({
-        apiKey: apiKeys.replicate,
+        apiKey: apiKeys.openai,
         prompt: p.prompt,
         aspectRatio: aspect,
+        quality: imageQuality,
       });
       const uploaded = await uploadToCloudinary({
         cloudName: apiKeys.cloudinaryCloud,
         apiKey: apiKeys.cloudinaryKey,
         apiSecret: apiKeys.cloudinarySecret,
-        imageUrl: gen.imageUrl,
+        imageUrl: gen.imageUrl,  // data URI from OpenAI; Cloudinary accepts these natively
         folder,
         publicId: p.slot,
       });
@@ -88,7 +94,8 @@ async function runImageGeneration({ db, userId, jobId, draftId, brandConfig, api
         width: uploaded.width,
         height: uploaded.height,
         model: gen.model,
-        replicateId: gen.predictionId,
+        quality: gen.quality,
+        size: gen.size,
         aspect,
         generatedAt: Date.now(),
       };
@@ -109,7 +116,9 @@ async function runImageGeneration({ db, userId, jobId, draftId, brandConfig, api
     await draftRef.update({
       images: succeeded,
       imagesStatus: status,
-      imagesError: failed.length ? `${failed.length} slot(s) failed: ${failed.map((f) => f.slot).join(", ")}` : null,
+      imagesError: failed.length
+        ? failed.map((f) => `${f.slot}: ${f.error}`).join(" | ").slice(0, 800)
+        : null,
       imagesAspect: aspect,
       updatedAt: FieldValue.serverTimestamp(),
     });
