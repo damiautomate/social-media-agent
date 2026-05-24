@@ -164,13 +164,13 @@ async function handleBootstrapJob(job, jobId) {
 // draft doc with image records.
 
 async function handleImagesJob(job, jobId) {
-  // Need API keys for Anthropic + Replicate + Cloudinary
+  // Need API keys for Anthropic (image prompter) + OpenAI (image gen) + Cloudinary (hosting)
   const userSnap = await db.collection("users").doc(job.userId).get();
   if (!userSnap.exists) throw new Error("User not found");
   const u = userSnap.data();
 
   if (!u.anthropicApiKey) throw new Error("Anthropic API key not configured");
-  if (!u.replicateApiKey) throw new Error("Replicate API key not configured");
+  if (!u.openaiApiKey) throw new Error("OpenAI API key not configured");
   const c = u.cloudinary || {};
   if (!c.cloudName || !c.apiKey || !c.apiSecret) {
     throw new Error("Cloudinary credentials not configured");
@@ -186,7 +186,7 @@ async function handleImagesJob(job, jobId) {
     brandConfig,
     apiKeys: {
       anthropic: u.anthropicApiKey,
-      replicate: u.replicateApiKey,
+      openai: u.openaiApiKey,
       cloudinaryCloud: c.cloudName,
       cloudinaryKey: c.apiKey,
       cloudinarySecret: c.apiSecret,
