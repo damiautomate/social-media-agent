@@ -28,7 +28,7 @@ export async function POST(request) {
   const user = await getUser(auth.userId);
   const missing = [];
   if (!user?.anthropicApiKey) missing.push("Anthropic API key");
-  if (!user?.replicateApiKey) missing.push("Replicate API key");
+  if (!user?.openaiApiKey) missing.push("OpenAI API key");
   const c = user?.cloudinary || {};
   if (!c.cloudName || !c.apiKey || !c.apiSecret) missing.push("Cloudinary credentials");
   if (missing.length) {
