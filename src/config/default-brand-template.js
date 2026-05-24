@@ -155,6 +155,9 @@ export const DEFAULT_BRAND_TEMPLATE = {
     description:
       "Modern, clean, content-focused photography and minimal illustration. Warm but not saturated. Editorial feel, never stocky.",
     aesthetic: "modern_minimalist",
+    // GPT Image 2 quality tier: "low" (~$0.006/img, draft-quality), "medium"
+    // (~$0.053/img, social-ready), or "high" (~$0.21/img, premium but slow).
+    imageQuality: "medium",
     colorPalette: ["#0F1B2D", "#D4AF37", "#FFFFFF", "#E5E7EB"],
     avoidElements: [
       "embedded text or typography",
