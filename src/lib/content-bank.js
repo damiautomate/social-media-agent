@@ -68,6 +68,13 @@ export async function setReplicateApiKey(userId, apiKey) {
   });
 }
 
+export async function setOpenaiApiKey(userId, apiKey) {
+  await userRef(userId).update({
+    openaiApiKey: apiKey,
+    lastActiveAt: FieldValue.serverTimestamp(),
+  });
+}
+
 export async function setCloudinaryKeys(userId, { cloudName, apiKey, apiSecret, folder }) {
   await userRef(userId).update({
     cloudinary: {
