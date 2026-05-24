@@ -163,11 +163,11 @@ export default function SettingsPage() {
   const [keyInput, setKeyInput] = useState("");
   const [keyMsg, setKeyMsg] = useState({ ok: "", err: "" });
 
-  // Replicate
-  const [replicateMasked, setReplicateMasked] = useState(null);
-  const [hasReplicateKey, setHasReplicateKey] = useState(false);
-  const [replicateInput, setReplicateInput] = useState("");
-  const [replicateMsg, setReplicateMsg] = useState({ ok: "", err: "" });
+  // OpenAI
+  const [openaiMasked, setOpenaiMasked] = useState(null);
+  const [hasOpenaiKey, setHasOpenaiKey] = useState(false);
+  const [openaiInput, setOpenaiInput] = useState("");
+  const [openaiMsg, setOpenaiMsg] = useState({ ok: "", err: "" });
 
   // Cloudinary
   const [cloudinaryInfo, setCloudinaryInfo] = useState({ hasCreds: false, cloudName: "", apiKeyMasked: null, folder: "" });
@@ -185,17 +185,17 @@ export default function SettingsPage() {
       }
       setUser(u);
       const token = await u.getIdToken();
-      const [cfg, key, repKey, cloud] = await Promise.all([
+      const [cfg, key, oaiKey, cloud] = await Promise.all([
         fetch("/api/brand-config", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
         fetch("/api/api-key", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()),
-        fetch("/api/replicate-key", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/openai-key", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => ({})),
         fetch("/api/cloudinary-keys", { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => ({})),
       ]);
       setConfig(cfg.brandConfig || null);
       setHasKey(!!key.hasKey);
       setMaskedKey(key.masked);
-      setHasReplicateKey(!!repKey.hasKey);
-      setReplicateMasked(repKey.masked);
+      setHasOpenaiKey(!!oaiKey.hasKey);
+      setOpenaiMasked(oaiKey.masked);
       setCloudinaryInfo({
         hasCreds: !!cloud.hasCreds,
         cloudName: cloud.cloudName || "",
@@ -257,22 +257,22 @@ export default function SettingsPage() {
     }
   }
 
-  async function saveReplicateKey() {
-    setReplicateMsg({ ok: "", err: "" });
+  async function saveOpenaiKey() {
+    setOpenaiMsg({ ok: "", err: "" });
     setBusy(true);
-    const res = await authedFetch("/api/replicate-key", {
+    const res = await authedFetch("/api/openai-key", {
       method: "POST",
-      body: JSON.stringify({ apiKey: replicateInput }),
+      body: JSON.stringify({ apiKey: openaiInput }),
     });
     setBusy(false);
     const data = await res.json().catch(() => ({}));
     if (res.ok) {
-      setHasReplicateKey(true);
-      setReplicateMasked(data.masked);
-      setReplicateInput("");
-      setReplicateMsg({ ok: "Verified and saved.", err: "" });
+      setHasOpenaiKey(true);
+      setOpenaiMasked(data.masked);
+      setOpenaiInput("");
+      setOpenaiMsg({ ok: "Verified and saved.", err: "" });
     } else {
-      setReplicateMsg({ ok: "", err: data.error + (data.detail ? `: ${data.detail}` : "") });
+      setOpenaiMsg({ ok: "", err: data.error + (data.detail ? `: ${data.detail}` : "") });
     }
   }
 
@@ -351,28 +351,28 @@ export default function SettingsPage() {
         </div>
 
         <div style={styles.section}>
-          <h2 style={styles.h2}>Replicate API Key</h2>
+          <h2 style={styles.h2}>OpenAI API Key</h2>
           <div style={{ color: "#a1a1aa", fontSize: 13 }}>
-            Powers image generation (Flux Schnell). Get one at{" "}
-            <a href="https://replicate.com/account/api-tokens" target="_blank" rel="noopener noreferrer" style={{ color: "#a78bfa" }}>
-              replicate.com/account/api-tokens
-            </a>. {hasReplicateKey ? `Current: ${replicateMasked}` : "No key on file."}
+            Powers image generation (GPT Image 2). Get one at{" "}
+            <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" style={{ color: "#a78bfa" }}>
+              platform.openai.com/api-keys
+            </a>. New accounts get $5 free credits — enough for ~80 medium-quality images. {hasOpenaiKey ? `Current: ${openaiMasked}` : "No key on file."}
           </div>
           <label style={styles.label}>Replace key</label>
           <input
             type="password"
-            placeholder="r8_..."
-            value={replicateInput}
-            onChange={(e) => setReplicateInput(e.target.value)}
+            placeholder="sk-..."
+            value={openaiInput}
+            onChange={(e) => setOpenaiInput(e.target.value)}
             style={styles.input}
           />
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-            <button style={styles.primary} disabled={busy || !replicateInput} onClick={saveReplicateKey}>
+            <button style={styles.primary} disabled={busy || !openaiInput} onClick={saveOpenaiKey}>
               {busy ? "Verifying..." : "Test and save"}
             </button>
           </div>
-          {replicateMsg.ok ? <div style={styles.ok}>{replicateMsg.ok}</div> : null}
-          {replicateMsg.err ? <div style={styles.err}>{replicateMsg.err}</div> : null}
+          {openaiMsg.ok ? <div style={styles.ok}>{openaiMsg.ok}</div> : null}
+          {openaiMsg.err ? <div style={styles.err}>{openaiMsg.err}</div> : null}
         </div>
 
         <div style={styles.section}>
@@ -455,6 +455,20 @@ export default function SettingsPage() {
               visualStyle: { ...(config.visualStyle || {}), aesthetic: e.target.value },
             })}
           />
+
+          <label style={styles.label}>Image quality (GPT Image 2 tier)</label>
+          <select
+            style={styles.input}
+            value={config.visualStyle?.imageQuality || "medium"}
+            onChange={(e) => setConfig({
+              ...config,
+              visualStyle: { ...(config.visualStyle || {}), imageQuality: e.target.value },
+            })}
+          >
+            <option value="low">Low — ~$0.006/image, fastest, draft quality</option>
+            <option value="medium">Medium — ~$0.053/image, social-ready (recommended)</option>
+            <option value="high">High — ~$0.21/image, premium but slow (30-60s/image)</option>
+          </select>
 
           <label style={styles.label}>Color palette (comma-separated hex codes)</label>
           <input
