@@ -2,16 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { onAuthStateChanged, signOut } from "firebase/auth";
-import {
-  collection,
-  onSnapshot,
-  orderBy,
-  query,
-  where,
-  limit,
-} from "firebase/firestore";
-import { auth, db } from "@/lib/firebase-client.js";
+
+import { supabase } from "@/lib/supabase-client.js";
 
 const PLATFORMS = ["linkedin", "instagram", "tiktok", "facebook"];
 
@@ -105,7 +97,7 @@ function UseIdeaModal({ idea, onClose, onConfirm, busy }) {
   if (!idea) return null;
   return (
     <div style={styles.modalBackdrop} onClick={onClose}>
-      <div className="m-modal" style={styles.modal} onClick={(e) => e.stopPropagation()}>
+      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div style={styles.modalTitle}>Generate a draft from this idea</div>
         <div style={{ color: "#a1a1aa", fontSize: 13, marginBottom: 12 }}>{idea.topic}</div>
         <label style={{ fontSize: 12, color: "#a1a1aa", display: "block", marginBottom: 4 }}>Platform</label>
@@ -138,57 +130,57 @@ export default function IdeasPage() {
 
   // Auth + load research config + subscribe to ideas + watch research jobs
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      if (!u) {
-        router.replace("/login");
-        return;
-      }
-      setUser(u);
-
-      const token = await u.getIdToken();
-      const res = await fetch("/api/research/sources", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const { research } = await res.json();
-        setResearch(research);
-      }
-    });
-    return unsub;
+    let mounted = true;
+    async function load(session) {
+      if (!session) { router.replace("/login"); return; }
+      setUser(session.user);
+      const token = session.access_token;
+      const res = await fetch("/api/research/sources", { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) { const { research } = await res.json(); if (mounted) setResearch(research); }
+    }
+    supabase.auth.getSession().then(({ data }) => { if (mounted) load(data.session); });
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => { if (!session) router.replace("/login"); });
+    return () => { mounted = false; sub.subscription.unsubscribe(); };
   }, [router]);
 
   useEffect(() => {
     if (!user) return;
-    const q = query(
-      collection(db, "ideas"),
-      where("userId", "==", user.uid),
-      orderBy("createdAt", "desc"),
-      limit(200),
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      setIdeas(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
-    return unsub;
+    let active = true;
+    async function fetchIdeas() {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/ideas", { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok && active) { const { ideas } = await res.json(); setIdeas(ideas || []); }
+    }
+    fetchIdeas();
+    const ch = supabase
+      .channel("ideas_" + user.id)
+      .on("postgres_changes", { event: "*", schema: "public", table: "ideas", filter: `user_id=eq.${user.id}` },
+        () => { fetchIdeas(); })
+      .subscribe();
+    return () => { active = false; supabase.removeChannel(ch); };
   }, [user]);
 
-  // Watch for an active research job (queued or processing)
+  // Watch for an active research job by polling (pending_jobs isn't client-readable under RLS)
   useEffect(() => {
     if (!user) return;
-    const q = query(
-      collection(db, "pending_jobs"),
-      where("userId", "==", user.uid),
-      where("type", "==", "research"),
-      where("status", "in", ["queued", "processing"]),
-      limit(1),
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      setActiveResearch(!snap.empty);
-    });
-    return unsub;
+    let active = true;
+    async function poll() {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/research/run", { method: "GET", headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+      // /api/research/run has no GET; instead rely on jobs/pending-count as a soft signal
+      const res2 = await fetch("/api/jobs/pending-count", { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+      if (res2 && res2.ok && active) { const { count } = await res2.json(); setActiveResearch(count > 0); }
+    }
+    poll();
+    const iv = setInterval(poll, 5000);
+    return () => { active = false; clearInterval(iv); };
   }, [user]);
 
   async function authedFetch(path, options = {}) {
-    const token = await user.getIdToken();
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
     return fetch(path, {
       ...options,
       headers: {

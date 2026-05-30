@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, onSnapshot } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase-client.js";
+
+
+import { supabase } from "@/lib/supabase-client.js";
 
 const styles = {
   page: { minHeight: "100vh", backgroundColor: "#0a0a0a", color: "#fafafa", fontFamily: "ui-sans-serif, system-ui" },
@@ -58,7 +58,7 @@ function ArrayEditor({ values, onChange, placeholder }) {
 function PillarEditor({ pillar, onChange, onRemove }) {
   return (
     <div style={styles.pillarRow}>
-      <div className="m-stack" style={{ display: "grid", gridTemplateColumns: "120px 1fr 80px auto", gap: 8, alignItems: "center" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 80px auto", gap: 8, alignItems: "center" }}>
         <input
           style={styles.input}
           placeholder="id"
@@ -125,32 +125,45 @@ export default function BootstrapPage() {
   const [applyPillars, setApplyPillars] = useState(true);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      if (!u) router.replace("/login");
-      else setUser(u);
+    let mounted = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      if (!data.session) router.replace("/login");
+      else setUser(data.session.user);
     });
-    return unsub;
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (!session) router.replace("/login");
+      else setUser(session.user);
+    });
+    return () => { mounted = false; sub.subscription.unsubscribe(); };
   }, [router]);
 
-  // Subscribe to proposal singleton
+  // Load proposal + subscribe to realtime updates on the user's bootstrap_proposals row
   useEffect(() => {
     if (!user) return;
-    const ref = doc(db, "bootstrap_proposals", user.uid);
-    const unsub = onSnapshot(ref, (snap) => {
-      if (!snap.exists()) { setProposal(null); return; }
-      const data = snap.data();
+    let active = true;
+    function applyRow(data) {
+      if (!data) { setProposal(null); return; }
       setProposal(data);
       if (data.status === "pending" && data.proposal) {
         setEditIdentity({ ...data.proposal.identity });
         setEditVoice({ ...data.proposal.voice });
         setEditPillars([...(data.proposal.contentPillars || [])]);
       }
-    });
-    return unsub;
+    }
+    supabase.from("bootstrap_proposals").select("*").eq("user_id", user.id).maybeSingle()
+      .then(({ data }) => { if (active) applyRow(data); });
+    const ch = supabase
+      .channel("bootstrap_" + user.id)
+      .on("postgres_changes", { event: "*", schema: "public", table: "bootstrap_proposals", filter: `user_id=eq.${user.id}` },
+        (payload) => { if (active) applyRow(payload.new); })
+      .subscribe();
+    return () => { active = false; supabase.removeChannel(ch); };
   }, [user]);
 
   async function authedFetch(path, options = {}) {
-    const token = await user.getIdToken();
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
     return fetch(path, {
       ...options,
       headers: {

@@ -2,450 +2,158 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "@/lib/firebase-client.js";
-
-const styles = {
-  page: { minHeight: "100vh", padding: "32px 16px" },
-  shell: { maxWidth: 720, margin: "0 auto" },
-  card: {
-    backgroundColor: "#18181b",
-    border: "1px solid #27272a",
-    borderRadius: 12,
-    padding: 28,
-  },
-  step: { color: "#a1a1aa", fontSize: 12, marginBottom: 6 },
-  h1: { fontSize: 24, margin: 0, marginBottom: 6 },
-  p: { color: "#a1a1aa", lineHeight: 1.5 },
-  label: { display: "block", fontSize: 12, color: "#a1a1aa", marginTop: 14, marginBottom: 6 },
-  input: {
-    width: "100%",
-    padding: "10px 12px",
-    backgroundColor: "#09090b",
-    color: "#e4e4e7",
-    border: "1px solid #27272a",
-    borderRadius: 8,
-    fontSize: 14,
-    boxSizing: "border-box",
-  },
-  textarea: {
-    width: "100%",
-    padding: "10px 12px",
-    backgroundColor: "#09090b",
-    color: "#e4e4e7",
-    border: "1px solid #27272a",
-    borderRadius: 8,
-    fontSize: 14,
-    boxSizing: "border-box",
-    minHeight: 100,
-    fontFamily: "inherit",
-  },
-  row: { display: "flex", gap: 12, marginTop: 20, justifyContent: "space-between" },
-  primary: {
-    padding: "10px 18px",
-    backgroundColor: "#7c3aed",
-    color: "white",
-    border: "none",
-    borderRadius: 8,
-    fontWeight: 600,
-    cursor: "pointer",
-    fontSize: 14,
-  },
-  ghost: {
-    padding: "10px 18px",
-    backgroundColor: "transparent",
-    color: "#a1a1aa",
-    border: "1px solid #27272a",
-    borderRadius: 8,
-    cursor: "pointer",
-    fontSize: 14,
-  },
-  err: {
-    backgroundColor: "#3f1d1d",
-    color: "#fca5a5",
-    padding: "8px 12px",
-    borderRadius: 8,
-    fontSize: 13,
-    marginTop: 12,
-  },
-  pillarRow: {
-    display: "grid",
-    gridTemplateColumns: "1fr 80px",
-    gap: 8,
-    alignItems: "center",
-    marginTop: 8,
-  },
-  sampleBlock: {
-    backgroundColor: "#09090b",
-    border: "1px solid #27272a",
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 8,
-  },
-};
-
-const PLATFORMS = ["linkedin", "instagram", "tiktok", "facebook"];
+import { supabase } from "@/lib/supabase-client.js";
 
 export default function OnboardingPage() {
   const router = useRouter();
   const [user, setUser] = useState(null);
-  const [step, setStep] = useState(1);
-  const [error, setError] = useState("");
+  const [step, setStep] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
 
+  // form state
   const [apiKey, setApiKey] = useState("");
   const [identity, setIdentity] = useState({ name: "", handle: "", tagline: "" });
-  const [pillars, setPillars] = useState([]);
-  const [samples, setSamples] = useState([
-    { platform: "linkedin", text: "", engagement: "" },
-  ]);
+  const [config, setConfig] = useState(null);
+  const [voiceSamples, setVoiceSamples] = useState("");
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      if (!u) {
-        router.replace("/login");
-        return;
-      }
-      setUser(u);
-      const token = await u.getIdToken();
-      const res = await fetch("/api/brand-config", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const { brandConfig } = await res.json();
-        if (brandConfig) {
-          setIdentity({
-            name: brandConfig.identity?.name || u.displayName || "",
-            handle: brandConfig.identity?.handle || "",
-            tagline: brandConfig.identity?.tagline || "",
-          });
-          setPillars(brandConfig.contentPillars || []);
-        }
-      }
+    let mounted = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      if (!data.session) { router.replace("/login"); return; }
+      setUser(data.session.user);
     });
-    return unsub;
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (!session) router.replace("/login");
+    });
+    return () => { mounted = false; sub.subscription.unsubscribe(); };
   }, [router]);
 
+  // load brand config once user known (prefill identity)
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      const token = await getToken();
+      const res = await fetch("/api/brand-config", { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const { brandConfig } = await res.json();
+        setConfig(brandConfig);
+        if (brandConfig?.identity) setIdentity({ ...brandConfig.identity });
+      }
+    })();
+  }, [user]);
+
+  async function getToken() {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token;
+  }
+
   async function authedFetch(path, options = {}) {
-    const token = await user.getIdToken();
-    return fetch(path, {
-      ...options,
-      headers: {
-        ...(options.headers || {}),
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-    });
+    const token = await getToken();
+    return fetch(path, { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${token}`, "Content-Type": "application/json" } });
   }
 
   async function saveApiKey() {
-    setError("");
-    setBusy(true);
-    const res = await authedFetch("/api/api-key", {
-      method: "POST",
-      body: JSON.stringify({ apiKey }),
-    });
+    setErr(""); setBusy(true);
+    const res = await authedFetch("/api/api-key", { method: "POST", body: JSON.stringify({ apiKey }) });
+    const data = await res.json().catch(() => ({}));
     setBusy(false);
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setError(data.error + (data.detail ? `: ${data.detail}` : ""));
-      return false;
-    }
-    return true;
+    if (!res.ok) { setErr(data.error || "Key validation failed"); return; }
+    setStep(2);
   }
 
   async function saveIdentity() {
-    setBusy(true);
-    const res = await authedFetch("/api/brand-config", {
-      method: "PUT",
-      body: JSON.stringify({ identity }),
-    });
+    setErr(""); setBusy(true);
+    const res = await authedFetch("/api/brand-config", { method: "PUT", body: JSON.stringify({ identity }) });
     setBusy(false);
-    if (!res.ok) {
-      setError("Failed to save identity");
-      return false;
-    }
-    return true;
+    if (!res.ok) { setErr("Failed to save identity"); return; }
+    setStep(3);
   }
 
-  async function savePillars() {
-    setBusy(true);
-    const res = await authedFetch("/api/brand-config", {
-      method: "PUT",
-      body: JSON.stringify({ contentPillars: pillars }),
-    });
+  async function saveVoiceAndFinish() {
+    setErr(""); setBusy(true);
+    // Turn the pasted blob into sample posts on the voice block
+    const samples = voiceSamples.split("\n---\n").map((t) => t.trim()).filter(Boolean).map((text) => ({ platform: "", text }));
+    const voice = { ...(config?.voice || {}), samplePosts: samples };
+    const res1 = await authedFetch("/api/brand-config", { method: "PUT", body: JSON.stringify({ voice }) });
+    if (!res1.ok) { setBusy(false); setErr("Failed to save voice"); return; }
+    const res2 = await authedFetch("/api/onboarding/complete", { method: "POST" });
     setBusy(false);
-    if (!res.ok) {
-      setError("Failed to save pillars");
-      return false;
-    }
-    return true;
-  }
-
-  async function saveSamples() {
-    setBusy(true);
-    const cleaned = samples
-      .map((s) => ({ ...s, text: (s.text || "").trim() }))
-      .filter((s) => s.text.length > 0);
-    const res = await authedFetch("/api/brand-config", {
-      method: "PUT",
-      body: JSON.stringify({ voice: { samplePosts: cleaned } }),
-    });
-    setBusy(false);
-    if (!res.ok) {
-      setError("Failed to save samples");
-      return false;
-    }
-    return true;
-  }
-
-  async function finish() {
-    setBusy(true);
-    const res = await authedFetch("/api/onboarding/complete", { method: "POST" });
-    setBusy(false);
-    if (res.ok) router.replace("/");
+    if (!res2.ok) { setErr("Failed to complete onboarding"); return; }
+    router.replace("/");
   }
 
   if (!user) {
-    return <main style={styles.page}><div style={styles.shell}>Loading…</div></main>;
+    return <main style={styles.page}><div style={{ padding: 40, color: "#71717a" }}>Loading…</div></main>;
   }
 
   return (
     <main style={styles.page}>
-      <div style={styles.shell}>
-        <div style={styles.card}>
-          <div style={styles.step}>Step {step} of 6</div>
+      <div style={styles.card}>
+        <div style={styles.progress}>Step {step + 1} of 5</div>
 
-          {step === 1 && (
-            <>
-              <h1 style={styles.h1}>Welcome.</h1>
-              <p style={styles.p}>
-                This tool helps you stay consistent across LinkedIn, Instagram,
-                TikTok, and Facebook by automating research, drafting, review, and
-                scheduling. Phase 1 covers drafting and review. You bring your own
-                Anthropic API key — generations are billed to you.
-              </p>
-              <div style={styles.row}>
-                <span />
-                <button style={styles.primary} onClick={() => setStep(2)}>Continue</button>
-              </div>
-            </>
-          )}
+        {err ? <div style={styles.err}>{err}</div> : null}
 
-          {step === 2 && (
-            <>
-              <h1 style={styles.h1}>Add your Anthropic API key</h1>
-              <p style={styles.p}>
-                Get a key at <span style={{ color: "#a78bfa" }}>console.anthropic.com</span>{" "}
-                → API keys. Stored privately on your account and used only for
-                your own generations. We&apos;ll make a tiny test call to verify it.
-              </p>
-              <label style={styles.label}>API key</label>
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-ant-..."
-                style={styles.input}
-              />
-              {error ? <div style={styles.err}>{error}</div> : null}
-              <div style={styles.row}>
-                <button style={styles.ghost} onClick={() => setStep(1)}>Back</button>
-                <button
-                  style={styles.primary}
-                  disabled={busy || !apiKey}
-                  onClick={async () => {
-                    if (await saveApiKey()) setStep(3);
-                  }}
-                >
-                  {busy ? "Verifying..." : "Verify and continue"}
-                </button>
-              </div>
-            </>
-          )}
+        {step === 0 ? (
+          <>
+            <h1 style={styles.h1}>Welcome 👋</h1>
+            <p style={styles.sub}>Let's set up your content engine. Takes ~3 minutes. You'll add your Anthropic API key, your identity, and a few writing samples so the AI matches your voice.</p>
+            <button style={styles.primary} onClick={() => setStep(1)}>Get started</button>
+          </>
+        ) : null}
 
-          {step === 3 && (
-            <>
-              <h1 style={styles.h1}>Brand identity</h1>
-              <p style={styles.p}>How do you want the AI to refer to you?</p>
-              <label style={styles.label}>Display name</label>
-              <input
-                style={styles.input}
-                value={identity.name}
-                onChange={(e) => setIdentity({ ...identity, name: e.target.value })}
-              />
-              <label style={styles.label}>Handle (without @)</label>
-              <input
-                style={styles.input}
-                value={identity.handle}
-                onChange={(e) => setIdentity({ ...identity, handle: e.target.value })}
-              />
-              <label style={styles.label}>One-line tagline</label>
-              <input
-                style={styles.input}
-                value={identity.tagline}
-                onChange={(e) => setIdentity({ ...identity, tagline: e.target.value })}
-              />
-              {error ? <div style={styles.err}>{error}</div> : null}
-              <div style={styles.row}>
-                <button style={styles.ghost} onClick={() => setStep(2)}>Back</button>
-                <button
-                  style={styles.primary}
-                  disabled={busy}
-                  onClick={async () => {
-                    if (await saveIdentity()) setStep(4);
-                  }}
-                >Continue</button>
-              </div>
-            </>
-          )}
+        {step === 1 ? (
+          <>
+            <h1 style={styles.h1}>Your Anthropic API key</h1>
+            <p style={styles.sub}>Each user brings their own key — your AI usage is billed to you directly. Get one at console.anthropic.com.</p>
+            <input type="password" placeholder="sk-ant-..." value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={styles.input} />
+            <button style={styles.primary} disabled={busy || !apiKey} onClick={saveApiKey}>{busy ? "Validating…" : "Validate & continue"}</button>
+          </>
+        ) : null}
 
-          {step === 4 && (
-            <>
-              <h1 style={styles.h1}>Content pillars</h1>
-              <p style={styles.p}>
-                These are your topical lanes. Defaults are pre-filled — adjust
-                weights so they total ~100, or skip and edit later.
-              </p>
-              {pillars.map((p, idx) => (
-                <div key={p.id || idx} style={{ marginTop: 16 }}>
-                  <div style={styles.pillarRow}>
-                    <input
-                      style={styles.input}
-                      value={p.name}
-                      onChange={(e) => {
-                        const copy = [...pillars];
-                        copy[idx] = { ...p, name: e.target.value };
-                        setPillars(copy);
-                      }}
-                    />
-                    <input
-                      style={styles.input}
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={p.weight}
-                      onChange={(e) => {
-                        const copy = [...pillars];
-                        copy[idx] = { ...p, weight: Number(e.target.value) || 0 };
-                        setPillars(copy);
-                      }}
-                    />
-                  </div>
-                  <textarea
-                    style={{ ...styles.textarea, marginTop: 6, minHeight: 60 }}
-                    value={p.description}
-                    onChange={(e) => {
-                      const copy = [...pillars];
-                      copy[idx] = { ...p, description: e.target.value };
-                      setPillars(copy);
-                    }}
-                  />
-                </div>
-              ))}
-              {error ? <div style={styles.err}>{error}</div> : null}
-              <div style={styles.row}>
-                <button style={styles.ghost} onClick={() => setStep(3)}>Back</button>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button style={styles.ghost} onClick={() => setStep(5)}>Skip</button>
-                  <button
-                    style={styles.primary}
-                    disabled={busy}
-                    onClick={async () => {
-                      if (await savePillars()) setStep(5);
-                    }}
-                  >Continue</button>
-                </div>
-              </div>
-            </>
-          )}
+        {step === 2 ? (
+          <>
+            <h1 style={styles.h1}>Your identity</h1>
+            <label style={styles.label}>Name</label>
+            <input value={identity.name} onChange={(e) => setIdentity({ ...identity, name: e.target.value })} style={styles.input} />
+            <label style={styles.label}>Handle (without @)</label>
+            <input value={identity.handle} onChange={(e) => setIdentity({ ...identity, handle: e.target.value })} style={styles.input} />
+            <label style={styles.label}>Tagline</label>
+            <input value={identity.tagline} onChange={(e) => setIdentity({ ...identity, tagline: e.target.value })} style={styles.input} />
+            <button style={styles.primary} disabled={busy} onClick={saveIdentity}>{busy ? "Saving…" : "Continue"}</button>
+          </>
+        ) : null}
 
-          {step === 5 && (
-            <>
-              <h1 style={styles.h1}>Voice samples</h1>
-              <p style={styles.p}>
-                Optional. Paste 2-3 of your best posts so the AI learns your
-                voice. You can add more in Settings later.
-              </p>
-              {samples.map((s, idx) => (
-                <div key={idx} style={styles.sampleBlock}>
-                  <select
-                    value={s.platform}
-                    onChange={(e) => {
-                      const copy = [...samples];
-                      copy[idx] = { ...s, platform: e.target.value };
-                      setSamples(copy);
-                    }}
-                    style={{ ...styles.input, width: "auto", marginBottom: 8 }}
-                  >
-                    {PLATFORMS.map((p) => (
-                      <option key={p} value={p}>{p}</option>
-                    ))}
-                  </select>
-                  <textarea
-                    placeholder="Paste post text..."
-                    value={s.text}
-                    onChange={(e) => {
-                      const copy = [...samples];
-                      copy[idx] = { ...s, text: e.target.value };
-                      setSamples(copy);
-                    }}
-                    style={styles.textarea}
-                  />
-                  <input
-                    placeholder="Engagement notes (e.g. 50 likes, 12 comments)"
-                    value={s.engagement}
-                    onChange={(e) => {
-                      const copy = [...samples];
-                      copy[idx] = { ...s, engagement: e.target.value };
-                      setSamples(copy);
-                    }}
-                    style={{ ...styles.input, marginTop: 8 }}
-                  />
-                </div>
-              ))}
-              <button
-                style={{ ...styles.ghost, marginTop: 12 }}
-                onClick={() =>
-                  setSamples([...samples, { platform: "linkedin", text: "", engagement: "" }])
-                }
-              >+ Add sample</button>
-              {error ? <div style={styles.err}>{error}</div> : null}
-              <div style={styles.row}>
-                <button style={styles.ghost} onClick={() => setStep(4)}>Back</button>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button style={styles.ghost} onClick={() => setStep(6)}>Skip</button>
-                  <button
-                    style={styles.primary}
-                    disabled={busy}
-                    onClick={async () => {
-                      if (await saveSamples()) setStep(6);
-                    }}
-                  >Continue</button>
-                </div>
-              </div>
-            </>
-          )}
+        {step === 3 ? (
+          <>
+            <h1 style={styles.h1}>Content pillars</h1>
+            <p style={styles.sub}>We've seeded sensible defaults (Automation, CRM, Freelance, Tools, Personal). You can fine-tune them later in Settings. For now, continue.</p>
+            <button style={styles.primary} onClick={() => setStep(4)}>Looks good, continue</button>
+          </>
+        ) : null}
 
-          {step === 6 && (
-            <>
-              <h1 style={styles.h1}>You&apos;re set.</h1>
-              <p style={styles.p}>
-                Your account is configured. Open the dashboard, type a topic,
-                pick a platform, and click Generate. New drafts appear in real
-                time when the Cloud Function finishes.
-              </p>
-              {error ? <div style={styles.err}>{error}</div> : null}
-              <div style={styles.row}>
-                <button style={styles.ghost} onClick={() => setStep(5)}>Back</button>
-                <button style={styles.primary} disabled={busy} onClick={finish}>
-                  {busy ? "Saving..." : "Open dashboard"}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+        {step === 4 ? (
+          <>
+            <h1 style={styles.h1}>Voice samples</h1>
+            <p style={styles.sub}>Paste 2-3 of your real posts so the AI learns your voice. Separate each with a line containing only <code>---</code>. You can skip and add later.</p>
+            <textarea value={voiceSamples} onChange={(e) => setVoiceSamples(e.target.value)} style={{ ...styles.input, minHeight: 160, fontFamily: "inherit" }} placeholder={"My first post...\n---\nMy second post..."} />
+            <button style={styles.primary} disabled={busy} onClick={saveVoiceAndFinish}>{busy ? "Finishing…" : "Finish setup"}</button>
+          </>
+        ) : null}
       </div>
     </main>
   );
 }
+
+const styles = {
+  page: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, backgroundColor: "#09090b" },
+  card: { width: "100%", maxWidth: 480, backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 14, padding: 28 },
+  progress: { color: "#71717a", fontSize: 12, marginBottom: 14, textTransform: "uppercase", letterSpacing: 1 },
+  h1: { margin: "0 0 8px", fontSize: 24, color: "#fafafa" },
+  sub: { margin: "0 0 18px", color: "#a1a1aa", fontSize: 14, lineHeight: 1.6 },
+  label: { display: "block", color: "#a1a1aa", fontSize: 13, margin: "12px 0 6px" },
+  input: { width: "100%", boxSizing: "border-box", backgroundColor: "#0a0a0a", color: "#e4e4e7", border: "1px solid #27272a", borderRadius: 8, padding: "12px 14px", fontSize: 15 },
+  primary: { width: "100%", marginTop: 20, padding: "13px 16px", backgroundColor: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, fontSize: 15, fontWeight: 600, cursor: "pointer" },
+  err: { backgroundColor: "#450a0a", border: "1px solid #7f1d1d", color: "#fca5a5", padding: "10px 12px", borderRadius: 8, fontSize: 13, marginBottom: 12 },
+};
