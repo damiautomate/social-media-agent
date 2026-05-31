@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase-client.js";
+import { AppShell } from "@/components/AppShell.js";
 
-const PLATFORM_COLORS = { linkedin: "#0a66c2", instagram: "#c13584", tiktok: "#000000", facebook: "#1877f2" };
-const STATUS_COLORS = { pending: "#a16207", approved: "#059669", rejected: "#7f1d1d", published: "#1d4ed8" };
+const PLATFORM_HUE = { linkedin: "var(--linkedin)", instagram: "var(--instagram)", tiktok: "var(--tiktok)", facebook: "var(--facebook)" };
+const STATUS_HUE = { pending: "var(--amber)", approved: "var(--mint)", rejected: "var(--rose)", published: "var(--sky)" };
 const PLATFORMS = ["linkedin", "instagram", "tiktok", "facebook"];
 
 export default function Dashboard() {
@@ -17,10 +18,9 @@ export default function Dashboard() {
   const [stats, setStats] = useState({ pending: 0, approved: 0, published: 0, ideas: 0 });
   const [statusFilter, setStatusFilter] = useState("all");
   const [platformFilter, setPlatformFilter] = useState("all");
-  const [showGen, setShowGen] = useState(true);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [pendingJobs, setPendingJobs] = useState(0);
 
-  // generate panel
   const [topic, setTopic] = useState("");
   const [angle, setAngle] = useState("");
   const [platform, setPlatform] = useState("linkedin");
@@ -29,11 +29,9 @@ export default function Dashboard() {
   const [generating, setGenerating] = useState(false);
   const [genMsg, setGenMsg] = useState({ ok: "", err: "" });
 
-  // scheduling UI state
   const [scheduleDraftId, setScheduleDraftId] = useState(null);
   const [scheduleDate, setScheduleDate] = useState("");
 
-  // ---- auth gate ----
   useEffect(() => {
     let mounted = true;
     supabase.auth.getSession().then(async ({ data }) => {
@@ -41,7 +39,6 @@ export default function Dashboard() {
       if (!data.session) { router.replace("/login"); return; }
       setUser(data.session.user);
       setAuthReady(true);
-      // ensure profile bootstrap + onboarding check
       const token = data.session.access_token;
       const res = await fetch("/api/auth/bootstrap", {
         method: "POST",
@@ -67,7 +64,6 @@ export default function Dashboard() {
     return fetch(path, { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${token}`, "Content-Type": "application/json" } });
   }
 
-  // ---- initial fetch + realtime on drafts ----
   async function refreshDrafts() {
     const res = await authedFetch("/api/drafts");
     if (res.ok) { const { drafts } = await res.json(); setDrafts(drafts || []); }
@@ -84,20 +80,13 @@ export default function Dashboard() {
   useEffect(() => {
     if (!user) return;
     let active = true;
-    refreshDrafts();
-    refreshStats();
-    refreshPendingCount();
-
-    // Realtime: any change to this user's drafts → refetch list + stats
+    refreshDrafts(); refreshStats(); refreshPendingCount();
     const ch = supabase
       .channel("drafts_" + user.id)
       .on("postgres_changes", { event: "*", schema: "public", table: "drafts", filter: `user_id=eq.${user.id}` },
         () => { if (active) { refreshDrafts(); refreshStats(); } })
       .subscribe();
-
-    // Poll pending job count (pending_jobs not client-readable under RLS)
     const iv = setInterval(() => { if (active) refreshPendingCount(); }, 5000);
-
     return () => { active = false; supabase.removeChannel(ch); clearInterval(iv); };
   }, [user]);
 
@@ -107,7 +96,6 @@ export default function Dashboard() {
       (platformFilter === "all" || d.platform === platformFilter));
   }, [drafts, statusFilter, platformFilter]);
 
-  // ---- actions ----
   async function generate() {
     setGenMsg({ ok: "", err: "" });
     if (!topic || !platform) { setGenMsg({ ok: "", err: "Topic and platform required" }); return; }
@@ -116,9 +104,10 @@ export default function Dashboard() {
     const data = await res.json().catch(() => ({}));
     setGenerating(false);
     if (!res.ok) { setGenMsg({ ok: "", err: data.error || "Generation failed to start" }); return; }
-    setGenMsg({ ok: "Queued! Your draft will appear below shortly.", err: "" });
+    setGenMsg({ ok: "Queued — your draft lands here in a few seconds.", err: "" });
     setTopic(""); setAngle(""); setContext("");
     refreshPendingCount();
+    setTimeout(() => { setSheetOpen(false); setGenMsg({ ok: "", err: "" }); }, 1100);
   }
 
   async function setDraftStatus(draftId, status) {
@@ -159,257 +148,232 @@ export default function Dashboard() {
   async function logout() { await supabase.auth.signOut(); router.replace("/login"); }
 
   if (!authReady) {
-    return <main style={styles.page}><div style={{ padding: 40, color: "#71717a" }}>Loading…</div></main>;
+    return (
+      <AppShell active="dashboard" onSignOut={logout}>
+        <main className="main">
+          <div className="page-head"><div className="skeleton" style={{ height: 36, width: 200 }} /></div>
+          <div className="stats">{[0,1,2,3,4].map((i) => <div key={i} className="skeleton" style={{ height: 78 }} />)}</div>
+          <div className="draft-grid">{[0,1].map((i) => <div key={i} className="skeleton" style={{ height: 200 }} />)}</div>
+        </main>
+      </AppShell>
+    );
   }
 
   return (
-    <main style={styles.page}>
-      <div style={styles.header}>
-        <h1 style={styles.h1}>Content Dashboard</h1>
-        <div style={styles.headerActions}>
-          <a href="/ideas" style={styles.navLink}>Ideas</a>
-          <a href="/bootstrap" style={styles.navLink}>Bootstrap</a>
-          <a href="/settings" style={styles.navLink}>Settings</a>
-          <button style={styles.navBtn} onClick={logout}>Sign out</button>
-        </div>
-      </div>
-
-      <div className="m-stack-4" style={styles.statsRow}>
-        <Stat label="Pending" value={stats.pending} />
-        <Stat label="Approved" value={stats.approved} />
-        <Stat label="Published" value={stats.published} />
-        <Stat label="Ideas" value={stats.ideas} />
-        <Stat label="Jobs running" value={pendingJobs} />
-      </div>
-
-      <div style={styles.panel}>
-        <div style={styles.panelHead} onClick={() => setShowGen((s) => !s)}>
-          <strong>+ Generate new</strong>
-          <span style={{ color: "#71717a" }}>{showGen ? "▲" : "▼"}</span>
-        </div>
-        {showGen ? (
-          <div style={styles.genBody}>
-            <div className="m-stack-2" style={styles.genRow}>
-              <div style={{ flex: 2 }}>
-                <label style={styles.label}>Topic *</label>
-                <input value={topic} onChange={(e) => setTopic(e.target.value)} style={styles.input} placeholder="e.g. why most CRM automations break at the data layer" />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={styles.label}>Platform *</label>
-                <select value={platform} onChange={(e) => setPlatform(e.target.value)} style={styles.input}>
-                  {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </div>
-            </div>
-            <div className="m-stack-2" style={styles.genRow}>
-              <div style={{ flex: 1 }}>
-                <label style={styles.label}>Angle (optional)</label>
-                <input value={angle} onChange={(e) => setAngle(e.target.value)} style={styles.input} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={styles.label}>Pillar id (optional)</label>
-                <input value={pillar} onChange={(e) => setPillar(e.target.value)} style={styles.input} placeholder="automation / crm / freelance…" />
-              </div>
-            </div>
-            <label style={styles.label}>Extra context (optional)</label>
-            <textarea value={context} onChange={(e) => setContext(e.target.value)} style={{ ...styles.input, minHeight: 60, fontFamily: "inherit" }} />
-            <button style={styles.primary} disabled={generating} onClick={generate}>{generating ? "Queuing…" : "Generate draft"}</button>
-            {genMsg.ok ? <div style={styles.ok}>{genMsg.ok}</div> : null}
-            {genMsg.err ? <div style={styles.err}>{genMsg.err}</div> : null}
+    <AppShell active="dashboard" onSignOut={logout}>
+      <main className="main">
+        <div className="page-head head-row">
+          <div>
+            <div className="eyebrow">Content Studio</div>
+            <h1 className="page-title">Your drafts</h1>
+            <p className="page-sub">Generate on-brand posts, attach media, publish or schedule.</p>
           </div>
-        ) : null}
-      </div>
+          <button className="btn btn-primary only-desktop" onClick={() => setSheetOpen(true)}>+ New draft</button>
+        </div>
 
-      <div className="m-stack-2" style={styles.filters}>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={styles.filterSel}>
-          <option value="all">All statuses</option>
-          <option value="pending">Pending</option>
-          <option value="approved">Approved</option>
-          <option value="published">Published</option>
-          <option value="rejected">Rejected</option>
-        </select>
-        <select value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)} style={styles.filterSel}>
-          <option value="all">All platforms</option>
-          {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-        </select>
-      </div>
+        <div className="stats">
+          <Stat val={stats.pending} label="Pending" hue="var(--amber)" />
+          <Stat val={stats.approved} label="Approved" hue="var(--mint)" />
+          <Stat val={stats.published} label="Published" hue="var(--sky)" />
+          <Stat val={stats.ideas} label="Ideas" hue="var(--accent-hi)" />
+          <Stat val={pendingJobs} label="Working" hue="var(--ink-3)" spin={pendingJobs > 0} />
+        </div>
 
-      <div style={styles.list}>
+        <div className="seg-scroll" style={{ marginBottom: 12 }}>
+          <div className="seg">
+            {["all", "pending", "approved", "published", "rejected"].map((s) => (
+              <button key={s} className={`seg-btn ${statusFilter === s ? "active" : ""}`} onClick={() => setStatusFilter(s)}>{s}</button>
+            ))}
+          </div>
+        </div>
+        <div className="seg-scroll" style={{ marginBottom: 20 }}>
+          <div className="seg">
+            <button className={`seg-btn ${platformFilter === "all" ? "active" : ""}`} onClick={() => setPlatformFilter("all")}>all</button>
+            {PLATFORMS.map((p) => (
+              <button key={p} className={`seg-btn ${platformFilter === p ? "active" : ""}`} onClick={() => setPlatformFilter(p)}>{p}</button>
+            ))}
+          </div>
+        </div>
+
         {filtered.length === 0 ? (
-          <div style={{ color: "#71717a", padding: 24, textAlign: "center" }}>No drafts yet. Generate one above.</div>
+          <div className="card empty">
+            <div className="empty-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg></div>
+            <div style={{ fontSize: 15, color: "var(--ink-2)", marginBottom: 4 }}>No drafts yet</div>
+            <div style={{ fontSize: 13 }}>Tap the + button to generate your first post.</div>
+          </div>
         ) : (
-          filtered.map((d) => (
-            <div key={d.id} className="m-card" style={styles.card}>
-              <div style={styles.cardHead}>
-                <div style={styles.badges}>
-                  <span style={{ ...styles.badge, backgroundColor: PLATFORM_COLORS[d.platform] || "#3f3f46" }}>{d.platform}</span>
-                  <span style={{ ...styles.badge, backgroundColor: STATUS_COLORS[d.status] || "#3f3f46" }}>{d.status}</span>
-                  {d.formatType ? <span style={styles.pillTag}>{d.formatType}</span> : null}
-                  {d.pillar ? <span style={styles.pillTag}>{d.pillar}</span> : null}
-                </div>
-              </div>
-              <div style={styles.postText}>{d.postText}</div>
-              {d.hashtags?.length ? <div style={styles.meta}>{d.hashtags.map((h) => `#${h}`).join(" ")}</div> : null}
-              {d.firstComment ? <div style={styles.meta}><strong>First comment:</strong> {d.firstComment}</div> : null}
-              {d.contentNotes ? <div style={styles.meta}>{d.contentNotes}</div> : null}
-
-              {/* Images */}
-              {d.imagesStatus === "generating" ? <div style={styles.pending}>Generating images…</div> : null}
-              {d.imagesStatus === "failed" ? <div style={styles.errBox}>Image generation failed: {d.imagesError || "unknown error"}</div> : null}
-              {Array.isArray(d.images) && d.images.length > 0 ? (
-                <div className="m-img-grid" style={styles.imgRow}>
-                  {d.images.map((img, i) => (
-                    <a key={i} href={img.url} target="_blank" rel="noopener noreferrer" title={img.prompt || ""}>
-                      <img src={img.url} alt={img.slot || `image-${i}`} style={styles.imgThumb} />
-                    </a>
-                  ))}
-                </div>
-              ) : null}
-
-              {/* Avatar video */}
-              {d.avatarVideoStatus === "generating" ? <div style={styles.pending}>Generating avatar video… (1-3 min)</div> : null}
-              {d.avatarVideoStatus === "failed" ? <div style={styles.errBox}>Avatar video failed: {d.avatarVideoError || "unknown error"}</div> : null}
-              {d.avatarVideoStatus === "ready" && d.avatarVideoUrl ? (
-                <div style={styles.videoBox}>
-                  <video src={d.avatarVideoUrl} poster={d.avatarVideoThumbnailUrl || undefined} controls playsInline preload="metadata" style={styles.videoPlayer} />
-                  <div style={styles.videoMeta}>
-                    {d.avatarVideoDuration ? `${Math.round(d.avatarVideoDuration)}s` : ""}
-                    {d.avatarVideoScriptWordCount ? ` · ${d.avatarVideoScriptWordCount} words` : ""}
-                    {" · "}<a href={d.avatarVideoUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#a78bfa" }}>open</a>
-                  </div>
-                </div>
-              ) : null}
-
-              {/* B-roll */}
-              {d.brollStatus === "generating" ? <div style={styles.pending}>Generating B-roll {d.brollMode === "storyboard" ? "storyboard" : "clip"}…</div> : null}
-              {(d.brollStatus === "failed" || d.brollStatus === "partial") ? <div style={styles.errBox}>{d.brollStatus === "partial" ? "Some B-roll clips failed: " : "B-roll failed: "}{d.brollError || "unknown error"}</div> : null}
-              {Array.isArray(d.brollClips) && d.brollClips.length > 0 ? (
-                <div style={styles.brollGrid}>
-                  {d.brollClips.map((c, i) => (
-                    <div key={c.slot || i} style={styles.brollCard}>
-                      <video src={c.url} controls playsInline preload="metadata" style={styles.brollVideo} />
-                      <div style={styles.brollMeta}><strong>{c.slot}</strong>{c.duration ? ` · ${c.duration}s` : ""}{c.intent ? <div style={{ marginTop: 2, fontStyle: "italic" }}>{c.intent}</div> : null}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-
-              {/* Actions */}
-              <div style={styles.actions}>
-                <button style={styles.btnApprove} onClick={() => setDraftStatus(d.id, "approved")}>Approve</button>
-                <button style={styles.btnReject} onClick={() => setDraftStatus(d.id, "rejected")}>Reject</button>
-                {d.formatType !== "document" ? (
-                  <button style={styles.btnImages} onClick={() => generateImages(d.id)} disabled={d.imagesStatus === "generating"}>
-                    {d.imagesStatus === "generating" ? "Generating images…" : (Array.isArray(d.images) && d.images.length ? "Regenerate images" : "Generate images")}
-                  </button>
-                ) : null}
-                {d.formatType !== "document" ? (
-                  <button style={styles.btnAvatar} onClick={() => generateAvatarVideo(d.id)} disabled={d.avatarVideoStatus === "generating"}>
-                    {d.avatarVideoStatus === "generating" ? "Generating video…" : (d.avatarVideoStatus === "ready" ? "Regenerate video" : "Generate avatar video")}
-                  </button>
-                ) : null}
-                {d.formatType !== "document" ? (
-                  <>
-                    <button style={styles.btnBroll} onClick={() => generateBroll(d.id, "single")} disabled={d.brollStatus === "generating"}>
-                      {d.brollStatus === "generating" && d.brollMode === "single" ? "Generating clip…" : "B-roll clip"}
-                    </button>
-                    <button style={styles.btnBroll} onClick={() => generateBroll(d.id, "storyboard")} disabled={d.brollStatus === "generating"}>
-                      {d.brollStatus === "generating" && d.brollMode === "storyboard" ? "Generating storyboard…" : "Storyboard"}
-                    </button>
-                  </>
-                ) : null}
-                <button style={styles.btnPublish} onClick={() => publishNow(d.id)} disabled={d.publishStatus === "publishing" || d.publishStatus === "published"}>
-                  {d.publishStatus === "publishing" ? "Publishing…" : (d.publishStatus === "published" ? "Published ✓" : "Approve & Post Now")}
-                </button>
-                <button style={styles.btnSchedule} onClick={() => openSchedule(d.id)} disabled={d.publishStatus === "publishing" || d.publishStatus === "scheduling"}>
-                  {d.publishStatus === "scheduling" ? "Scheduling…" : (d.publishStatus === "scheduled" ? "Reschedule" : "Schedule")}
-                </button>
-              </div>
-
-              {scheduleDraftId === d.id ? (
-                <div style={styles.scheduleRow}>
-                  <input type="datetime-local" style={styles.dateInput} value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} />
-                  <button style={styles.btnPublish} onClick={() => confirmSchedule(d.id)}>Confirm schedule</button>
-                  <button style={styles.btnReject} onClick={cancelSchedule}>Cancel</button>
-                </div>
-              ) : null}
-
-              {/* Publish status */}
-              {(d.publishStatus === "publishing" || d.publishStatus === "scheduling") ? <div style={{ ...styles.publishBox, ...styles.pubPending }}>{d.publishStatus === "publishing" ? "Publishing now…" : "Scheduling…"}</div> : null}
-              {d.publishStatus === "published" ? <div style={{ ...styles.publishBox, ...styles.pubOk }}>Published ✓ via {d.publishProvider || "provider"}{Array.isArray(d.publishProviderPostIds) && d.publishProviderPostIds.length ? ` · post id: ${d.publishProviderPostIds.join(", ")}` : ""}</div> : null}
-              {d.publishStatus === "scheduled" ? <div style={{ ...styles.publishBox, ...styles.pubSched }}>Scheduled for {d.publishScheduledFor ? new Date(d.publishScheduledFor).toLocaleString() : "(unknown)"}</div> : null}
-              {d.publishStatus === "failed" ? <div style={{ ...styles.publishBox, ...styles.pubErr }}>Publish failed: {d.publishError || "unknown error"}</div> : null}
-            </div>
-          ))
+          <div className={`draft-grid ${filtered.length === 1 ? "single" : ""}`}>
+            {filtered.map((d) => (
+              <DraftCard key={d.id} d={d}
+                onStatus={setDraftStatus} onImages={generateImages} onAvatar={generateAvatarVideo}
+                onBroll={generateBroll} onPublish={publishNow}
+                scheduleDraftId={scheduleDraftId} scheduleDate={scheduleDate} setScheduleDate={setScheduleDate}
+                openSchedule={openSchedule} cancelSchedule={cancelSchedule} confirmSchedule={confirmSchedule} />
+            ))}
+          </div>
         )}
-      </div>
-    </main>
+      </main>
+
+      {/* FAB (mobile) */}
+      <button className="fab" onClick={() => setSheetOpen(true)} aria-label="New draft">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+
+      {/* Generate sheet / modal */}
+      {sheetOpen ? (
+        <>
+          <div className="scrim" onClick={() => setSheetOpen(false)} />
+          <div className="sheet">
+            <div className="sheet-handle" />
+            <h2 className="section-title" style={{ marginBottom: 14 }}>New draft</h2>
+
+            <div className="field">
+              <label className="label">Topic</label>
+              <input className="input" value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="e.g. why most CRM automations break at the data layer" />
+            </div>
+            <div className="field">
+              <label className="label">Platform</label>
+              <div className="seg" style={{ display: "flex" }}>
+                {PLATFORMS.map((p) => (
+                  <button key={p} className={`seg-btn ${platform === p ? "active" : ""}`} style={{ flex: 1 }} onClick={() => setPlatform(p)}>{p}</button>
+                ))}
+              </div>
+            </div>
+            <div className="field">
+              <label className="label">Angle <span style={{ color: "var(--ink-4)" }}>· optional</span></label>
+              <input className="input" value={angle} onChange={(e) => setAngle(e.target.value)} />
+            </div>
+            <div className="field">
+              <label className="label">Pillar id <span style={{ color: "var(--ink-4)" }}>· optional</span></label>
+              <input className="input" value={pillar} onChange={(e) => setPillar(e.target.value)} placeholder="automation / crm / freelance…" />
+            </div>
+            <div className="field">
+              <label className="label">Extra context <span style={{ color: "var(--ink-4)" }}>· optional</span></label>
+              <textarea className="textarea" value={context} onChange={(e) => setContext(e.target.value)} />
+            </div>
+            <button className="btn btn-primary btn-block" disabled={generating} onClick={generate}>
+              {generating ? "Queuing…" : "Generate draft"}
+            </button>
+            {genMsg.ok ? <div className="note note-ok">{genMsg.ok}</div> : null}
+            {genMsg.err ? <div className="note note-err">{genMsg.err}</div> : null}
+          </div>
+        </>
+      ) : null}
+    </AppShell>
   );
 }
 
-function Stat({ label, value }) {
+function Stat({ val, label, hue, spin }) {
   return (
-    <div style={styles.statCard}>
-      <div style={styles.statValue}>{value}</div>
-      <div style={styles.statLabel}>{label}</div>
+    <div className="stat">
+      <div className="stat-val" style={{ color: hue }}>{val}</div>
+      <div className="stat-lbl">
+        {spin ? <span className="dot spin" style={{ background: "var(--accent-hi)", width: 7, height: 7 }} /> : <span className="dot" style={{ background: hue }} />}
+        {label}
+      </div>
     </div>
   );
 }
 
-const styles = {
-  page: { maxWidth: 900, margin: "0 auto", padding: "24px 16px 80px" },
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 10 },
-  h1: { fontSize: 24, margin: 0, color: "#fafafa" },
-  headerActions: { display: "flex", gap: 8, alignItems: "center" },
-  navLink: { color: "#a78bfa", textDecoration: "none", fontSize: 14, padding: "6px 10px" },
-  navBtn: { background: "#27272a", color: "#e4e4e7", border: "none", borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontSize: 14 },
-  statsRow: { display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" },
-  statCard: { flex: 1, minWidth: 90, backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 10, padding: "12px 14px" },
-  statValue: { fontSize: 24, fontWeight: 700, color: "#fafafa" },
-  statLabel: { fontSize: 12, color: "#71717a", marginTop: 2 },
-  panel: { backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 12, marginBottom: 20, overflow: "hidden" },
-  panelHead: { padding: "14px 16px", display: "flex", justifyContent: "space-between", cursor: "pointer", color: "#e4e4e7" },
-  genBody: { padding: "0 16px 16px" },
-  genRow: { display: "flex", gap: 12, marginBottom: 10 },
-  label: { display: "block", color: "#a1a1aa", fontSize: 12, margin: "8px 0 4px" },
-  input: { width: "100%", boxSizing: "border-box", backgroundColor: "#0a0a0a", color: "#e4e4e7", border: "1px solid #27272a", borderRadius: 8, padding: "10px 12px", fontSize: 14 },
-  primary: { marginTop: 14, padding: "11px 18px", backgroundColor: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: "pointer" },
-  filters: { display: "flex", gap: 10, marginBottom: 14 },
-  filterSel: { backgroundColor: "#18181b", color: "#e4e4e7", border: "1px solid #27272a", borderRadius: 8, padding: "8px 12px", fontSize: 14 },
-  list: { display: "flex", flexDirection: "column", gap: 14 },
-  card: { backgroundColor: "#18181b", border: "1px solid #27272a", borderRadius: 12, padding: 16 },
-  cardHead: { marginBottom: 10 },
-  badges: { display: "flex", gap: 6, flexWrap: "wrap" },
-  badge: { color: "#fff", fontSize: 11, padding: "2px 8px", borderRadius: 999, textTransform: "capitalize" },
-  pillTag: { backgroundColor: "#27272a", color: "#a1a1aa", fontSize: 11, padding: "2px 8px", borderRadius: 999 },
-  postText: { color: "#e4e4e7", fontSize: 14, lineHeight: 1.6, whiteSpace: "pre-wrap", marginBottom: 10 },
-  meta: { color: "#a1a1aa", fontSize: 12, marginBottom: 6, lineHeight: 1.5 },
-  pending: { color: "#c7d2fe", fontSize: 12, marginTop: 10, padding: "8px 12px", backgroundColor: "#1e1b4b", borderRadius: 6, border: "1px solid #6366f1" },
-  errBox: { color: "#fca5a5", fontSize: 12, marginTop: 10, padding: "8px 12px", backgroundColor: "#450a0a", borderRadius: 6, border: "1px solid #7f1d1d" },
-  imgRow: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 },
-  imgThumb: { width: 90, height: 90, objectFit: "cover", borderRadius: 8, border: "1px solid #27272a" },
-  videoBox: { marginTop: 12, display: "flex", flexDirection: "column", gap: 6 },
-  videoPlayer: { maxWidth: 280, width: "100%", borderRadius: 10, border: "1px solid #27272a", backgroundColor: "#000" },
-  videoMeta: { color: "#71717a", fontSize: 11 },
-  brollGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginTop: 12 },
-  brollCard: { backgroundColor: "#09090b", borderRadius: 8, border: "1px solid #27272a", overflow: "hidden" },
-  brollVideo: { width: "100%", display: "block", backgroundColor: "#000" },
-  brollMeta: { padding: "6px 10px", color: "#a1a1aa", fontSize: 11, lineHeight: 1.4 },
-  actions: { display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" },
-  btnApprove: { padding: "6px 14px", backgroundColor: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 },
-  btnReject: { padding: "6px 14px", backgroundColor: "#3f3f46", color: "#e4e4e7", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 },
-  btnImages: { padding: "6px 12px", backgroundColor: "#1e3a5f", color: "#bfdbfe", border: "1px solid #2563eb", borderRadius: 6, cursor: "pointer", fontSize: 12 },
-  btnAvatar: { padding: "6px 12px", backgroundColor: "#0c4a6e", color: "#bae6fd", border: "1px solid #075985", borderRadius: 6, cursor: "pointer", fontSize: 12 },
-  btnBroll: { padding: "6px 12px", backgroundColor: "#3f1d61", color: "#e9d5ff", border: "1px solid #6d28d9", borderRadius: 6, cursor: "pointer", fontSize: 12 },
-  btnPublish: { padding: "6px 12px", backgroundColor: "#064e3b", color: "#bbf7d0", border: "1px solid #047857", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 },
-  btnSchedule: { padding: "6px 12px", backgroundColor: "#1c1917", color: "#fbbf24", border: "1px solid #ca8a04", borderRadius: 6, cursor: "pointer", fontSize: 12 },
-  scheduleRow: { display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" },
-  dateInput: { backgroundColor: "#0a0a0a", color: "#e4e4e7", border: "1px solid #27272a", padding: "6px 10px", borderRadius: 6, fontSize: 12 },
-  publishBox: { marginTop: 10, padding: "8px 12px", borderRadius: 6, fontSize: 12, lineHeight: 1.5 },
-  pubOk: { backgroundColor: "#022c22", border: "1px solid #047857", color: "#a7f3d0" },
-  pubSched: { backgroundColor: "#292524", border: "1px solid #a16207", color: "#fcd34d" },
-  pubPending: { backgroundColor: "#1e1b4b", border: "1px solid #6366f1", color: "#c7d2fe" },
-  pubErr: { backgroundColor: "#450a0a", border: "1px solid #7f1d1d", color: "#fca5a5" },
-  ok: { marginTop: 10, color: "#a7f3d0", fontSize: 13 },
-  err: { marginTop: 10, color: "#fca5a5", fontSize: 13 },
-};
+function DraftCard({ d, onStatus, onImages, onAvatar, onBroll, onPublish, scheduleDraftId, scheduleDate, setScheduleDate, openSchedule, cancelSchedule, confirmSchedule }) {
+  const isDoc = d.formatType === "document";
+  return (
+    <div className="card draft rise">
+      <div className="draft-top">
+        <div className="draft-meta-row">
+          <span className="badge" style={{ background: "color-mix(in srgb, " + (PLATFORM_HUE[d.platform] || "var(--ink-3)") + " 18%, transparent)", color: PLATFORM_HUE[d.platform] || "var(--ink-2)" }}>{d.platform}</span>
+          <span className="badge" style={{ background: "color-mix(in srgb, " + (STATUS_HUE[d.status] || "var(--ink-3)") + " 16%, transparent)", color: STATUS_HUE[d.status] || "var(--ink-2)" }}>{d.status}</span>
+          {d.formatType ? <span className="chip">{d.formatType}</span> : null}
+          {d.pillar ? <span className="chip">{d.pillar}</span> : null}
+        </div>
+      </div>
+
+      <div className="draft-body">{d.postText}</div>
+      {d.hashtags?.length ? <div className="draft-tags">{d.hashtags.map((h) => `#${h}`).join(" ")}</div> : null}
+      {d.firstComment ? <div className="draft-sub"><strong>First comment:</strong> {d.firstComment}</div> : null}
+      {d.contentNotes ? <div className="draft-sub">{d.contentNotes}</div> : null}
+
+      {d.imagesStatus === "generating" ? <div className="media-state media-working"><span className="dot spin" style={{ background: "currentColor" }} /> Generating images…</div> : null}
+      {d.imagesStatus === "failed" ? <div className="media-state media-fail">Image generation failed: {d.imagesError || "unknown error"}</div> : null}
+      {Array.isArray(d.images) && d.images.length > 0 ? (
+        <div className="img-row">
+          {d.images.map((img, i) => (
+            <a key={i} href={img.url} target="_blank" rel="noopener noreferrer" title={img.prompt || ""}>
+              <img src={img.url} alt={img.slot || `image-${i}`} className="img-thumb" />
+            </a>
+          ))}
+        </div>
+      ) : null}
+
+      {d.avatarVideoStatus === "generating" ? <div className="media-state media-working"><span className="dot spin" style={{ background: "currentColor" }} /> Generating avatar video… (1-3 min)</div> : null}
+      {d.avatarVideoStatus === "failed" ? <div className="media-state media-fail">Avatar video failed: {d.avatarVideoError || "unknown error"}</div> : null}
+      {d.avatarVideoStatus === "ready" && d.avatarVideoUrl ? (
+        <div className="video-box">
+          <video src={d.avatarVideoUrl} poster={d.avatarVideoThumbnailUrl || undefined} controls playsInline preload="metadata" className="video-player" />
+          <div className="video-meta">
+            {d.avatarVideoDuration ? `${Math.round(d.avatarVideoDuration)}s` : ""}
+            {d.avatarVideoScriptWordCount ? ` · ${d.avatarVideoScriptWordCount} words` : ""}
+            {" · "}<a href={d.avatarVideoUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent-hi)" }}>open</a>
+          </div>
+        </div>
+      ) : null}
+
+      {d.brollStatus === "generating" ? <div className="media-state media-working"><span className="dot spin" style={{ background: "currentColor" }} /> Generating B-roll {d.brollMode === "storyboard" ? "storyboard" : "clip"}…</div> : null}
+      {(d.brollStatus === "failed" || d.brollStatus === "partial") ? <div className="media-state media-fail">{d.brollStatus === "partial" ? "Some B-roll clips failed: " : "B-roll failed: "}{d.brollError || "unknown error"}</div> : null}
+      {Array.isArray(d.brollClips) && d.brollClips.length > 0 ? (
+        <div className="broll-grid">
+          {d.brollClips.map((c, i) => (
+            <div key={c.slot || i} className="broll-card">
+              <video src={c.url} controls playsInline preload="metadata" />
+              <div className="broll-meta"><strong style={{ color: "var(--ink-2)" }}>{c.slot}</strong>{c.duration ? ` · ${c.duration}s` : ""}{c.intent ? <div style={{ marginTop: 2, fontStyle: "italic" }}>{c.intent}</div> : null}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="actions">
+        <button className="btn btn-sm btn-mint" onClick={() => onStatus(d.id, "approved")}>Approve</button>
+        <button className="btn btn-sm btn-rose" onClick={() => onStatus(d.id, "rejected")}>Reject</button>
+        {!isDoc ? (
+          <button className="btn btn-sm btn-ghost" onClick={() => onImages(d.id)} disabled={d.imagesStatus === "generating"}>
+            {d.imagesStatus === "generating" ? "Images…" : (Array.isArray(d.images) && d.images.length ? "Regen images" : "Images")}
+          </button>
+        ) : null}
+        {!isDoc ? (
+          <button className="btn btn-sm btn-ghost" onClick={() => onAvatar(d.id)} disabled={d.avatarVideoStatus === "generating"}>
+            {d.avatarVideoStatus === "generating" ? "Video…" : (d.avatarVideoStatus === "ready" ? "Regen video" : "Avatar video")}
+          </button>
+        ) : null}
+        {!isDoc ? (
+          <>
+            <button className="btn btn-sm btn-ghost" onClick={() => onBroll(d.id, "single")} disabled={d.brollStatus === "generating"}>
+              {d.brollStatus === "generating" && d.brollMode === "single" ? "Clip…" : "B-roll"}
+            </button>
+            <button className="btn btn-sm btn-ghost" onClick={() => onBroll(d.id, "storyboard")} disabled={d.brollStatus === "generating"}>
+              {d.brollStatus === "generating" && d.brollMode === "storyboard" ? "Storyboard…" : "Storyboard"}
+            </button>
+          </>
+        ) : null}
+        <button className="btn btn-sm btn-primary" onClick={() => onPublish(d.id)} disabled={d.publishStatus === "publishing" || d.publishStatus === "published"}>
+          {d.publishStatus === "publishing" ? "Publishing…" : (d.publishStatus === "published" ? "Published ✓" : "Post now")}
+        </button>
+        <button className="btn btn-sm btn-soft" onClick={() => openSchedule(d.id)} disabled={d.publishStatus === "publishing" || d.publishStatus === "scheduling"}>
+          {d.publishStatus === "scheduling" ? "Scheduling…" : (d.publishStatus === "scheduled" ? "Reschedule" : "Schedule")}
+        </button>
+      </div>
+
+      {scheduleDraftId === d.id ? (
+        <div className="schedule-row">
+          <input type="datetime-local" className="input" style={{ flex: 1, minWidth: 180 }} value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} />
+          <button className="btn btn-sm btn-primary" onClick={() => confirmSchedule(d.id)}>Confirm</button>
+          <button className="btn btn-sm btn-soft" onClick={cancelSchedule}>Cancel</button>
+        </div>
+      ) : null}
+
+      {(d.publishStatus === "publishing" || d.publishStatus === "scheduling") ? <div className="pub pub-work">{d.publishStatus === "publishing" ? "Publishing now…" : "Scheduling…"}</div> : null}
+      {d.publishStatus === "published" ? <div className="pub pub-ok">Published ✓ via {d.publishProvider || "provider"}{Array.isArray(d.publishProviderPostIds) && d.publishProviderPostIds.length ? ` · ${d.publishProviderPostIds.join(", ")}` : ""}</div> : null}
+      {d.publishStatus === "scheduled" ? <div className="pub pub-sched">Scheduled for {d.publishScheduledFor ? new Date(d.publishScheduledFor).toLocaleString() : "(unknown)"}</div> : null}
+      {d.publishStatus === "failed" ? <div className="pub pub-err">Publish failed: {d.publishError || "unknown error"}</div> : null}
+    </div>
+  );
+}
