@@ -38,31 +38,97 @@ function media(draft: any, pref: string) {
   return { images, videos };
 }
 
-// ---------- LinkedIn (UGC post on personal profile) ----------
-async function publishLinkedIn(conn: any, draft: any) {
-  const author = conn.meta.memberUrn || `urn:li:person:${conn.accountId}`;
-  const text = composeText(draft);
-  // Text-only share (image/video upload on LinkedIn is a separate multi-step
-  // registerUpload flow — handled in a later iteration; text ships now).
-  const body = {
-    author,
-    lifecycleState: "PUBLISHED",
-    specificContent: {
-      "com.linkedin.ugc.ShareContent": {
-        shareCommentary: { text },
-        shareMediaCategory: "NONE",
-      },
-    },
-    visibility: { "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC" },
+// ---------- LinkedIn (versioned Posts API + Images API) ----------
+// Uses /rest/posts (+ /rest/images for media). The old unversioned /v2/ugcPosts
+// is being sunset by LinkedIn; this path supports text, single image, multi-image,
+// and gives us the structure to add video (/rest/videos) later.
+const LINKEDIN_VERSION = "202505"; // YYYYMM — bump periodically; each version is supported ~1 year
+
+function linkedinHeaders(token: string, json = true) {
+  const h: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    "X-Restli-Protocol-Version": "2.0.0",
+    "LinkedIn-Version": LINKEDIN_VERSION,
   };
-  const res = await fetch("https://api.linkedin.com/v2/ugcPosts", {
+  if (json) h["Content-Type"] = "application/json";
+  return h;
+}
+
+// Upload one image to LinkedIn, return its image URN (urn:li:image:...).
+async function linkedinUploadImage(token: string, ownerUrn: string, imageUrl: string): Promise<string> {
+  // 1) initialize upload — get an uploadUrl + image URN
+  const initRes = await fetch("https://api.linkedin.com/rest/images?action=initializeUpload", {
     method: "POST",
-    headers: { Authorization: `Bearer ${conn.accessToken}`, "Content-Type": "application/json", "X-Restli-Protocol-Version": "2.0.0" },
-    body: JSON.stringify(body),
+    headers: linkedinHeaders(token),
+    body: JSON.stringify({ initializeUploadRequest: { owner: ownerUrn } }),
   });
-  if (!res.ok) throw new Error(`LinkedIn ugcPosts HTTP ${res.status}: ${(await res.text()).slice(0, 250)}`);
+  if (!initRes.ok) throw new Error(`LinkedIn image init HTTP ${initRes.status}: ${(await initRes.text()).slice(0, 200)}`);
+  const init = await initRes.json();
+  const uploadUrl = init?.value?.uploadUrl;
+  const imageUrn = init?.value?.image;
+  if (!uploadUrl || !imageUrn) throw new Error("LinkedIn image init returned no uploadUrl/urn");
+
+  // 2) fetch the bytes from Cloudinary
+  const imgRes = await fetch(imageUrl);
+  if (!imgRes.ok) throw new Error(`Fetch image bytes HTTP ${imgRes.status}`);
+  const bytes = new Uint8Array(await imgRes.arrayBuffer());
+
+  // 3) PUT the bytes to LinkedIn's upload URL (binary, bearer-auth)
+  const putRes = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}` },
+    body: bytes,
+  });
+  if (!putRes.ok && putRes.status !== 201) throw new Error(`LinkedIn image upload HTTP ${putRes.status}: ${(await putRes.text()).slice(0, 200)}`);
+  return imageUrn;
+}
+
+async function publishLinkedIn(conn: any, draft: any, pref: string) {
+  const author = conn.meta.memberUrn || `urn:li:person:${conn.accountId}`;
+  const token = conn.accessToken;
+  const { images } = media(draft, pref);
+
+  // No images → use the proven legacy text path (don't regress what already works).
+  if (images.length === 0) {
+    const body = {
+      author, lifecycleState: "PUBLISHED",
+      specificContent: { "com.linkedin.ugc.ShareContent": { shareCommentary: { text: composeText(draft) }, shareMediaCategory: "NONE" } },
+      visibility: { "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC" },
+    };
+    const res = await fetch("https://api.linkedin.com/v2/ugcPosts", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "X-Restli-Protocol-Version": "2.0.0" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`LinkedIn ugcPosts HTTP ${res.status}: ${(await res.text()).slice(0, 250)}`);
+    const id = res.headers.get("x-restli-id") || (await res.json().catch(() => ({})))?.id || null;
+    return { postIds: id ? [id] : [], imagesPosted: 0 };
+  }
+
+  // Images present → versioned Images API + Posts API (single or multi-image).
+  const commentary = composeText(draft);
+  const imageUrns: string[] = [];
+  for (const url of images.slice(0, 9)) {
+    try { imageUrns.push(await linkedinUploadImage(token, author, url)); }
+    catch (e) { console.warn("LI image skip:", (e as Error).message); }
+  }
+  if (imageUrns.length === 0) throw new Error("All image uploads to LinkedIn failed — check the LinkedIn-Version/product access (Community Management API).");
+
+  const post: any = {
+    author, commentary, visibility: "PUBLIC",
+    distribution: { feedDistribution: "MAIN_FEED", targetEntities: [], thirdPartyDistributionChannels: [] },
+    lifecycleState: "PUBLISHED", isReshareDisabledByAuthor: false,
+  };
+  const altBase = (draft.alt_text || draft.hook_preview || "image").slice(0, 300);
+  if (imageUrns.length === 1) post.content = { media: { id: imageUrns[0], altText: altBase } };
+  else post.content = { multiImage: { images: imageUrns.map((id, i) => ({ id, altText: `${altBase} ${i + 1}`.slice(0, 300) })) } };
+
+  const res = await fetch("https://api.linkedin.com/rest/posts", {
+    method: "POST", headers: linkedinHeaders(token), body: JSON.stringify(post),
+  });
+  if (!res.ok && res.status !== 201) throw new Error(`LinkedIn posts HTTP ${res.status}: ${(await res.text()).slice(0, 250)}`);
   const id = res.headers.get("x-restli-id") || (await res.json().catch(() => ({})))?.id || null;
-  return { postIds: id ? [id] : [] };
+  return { postIds: id ? [id] : [], imagesPosted: imageUrns.length };
 }
 
 // ---------- Facebook Page ----------
@@ -152,7 +218,7 @@ async function publishTikTok(conn: any, draft: any, pref: string) {
 }
 
 const PUBLISHERS: Record<string, any> = {
-  linkedin: publishLinkedIn,
+  linkedin: (c: any, d: any, p: string) => publishLinkedIn(c, d, p),
   facebook: (c: any, d: any, p: string) => publishFacebook(c, d, p),
   instagram: (c: any, d: any, p: string) => publishInstagram(c, d, p),
   tiktok: (c: any, d: any, p: string) => publishTikTok(c, d, p),
