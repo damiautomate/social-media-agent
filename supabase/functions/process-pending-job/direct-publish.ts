@@ -23,16 +23,29 @@ async function getConnection(admin: any, userId: string, platform: string) {
   };
 }
 
+// JSONB columns normally arrive parsed, but guard against string-encoded values.
+function j(v: any) {
+  if (v == null) return v;
+  if (typeof v === "string") { try { return JSON.parse(v); } catch { return v; } }
+  return v;
+}
+
 function composeText(draft: any) {
-  const tags = (draft.hashtags || []).map((h: string) => `#${h}`).join(" ");
+  const raw = j(draft.hashtags) || [];
+  const tags = (Array.isArray(raw) ? raw : [])
+    .map((h: string) => `#${String(h).replace(/^#+/, "")}`) // strip any existing # so we never double it
+    .join(" ");
   return draft.post_text + (tags ? `\n\n${tags}` : "");
 }
 
 // Collect media URLs (already hosted on Cloudinary) in preference order.
 function media(draft: any, pref: string) {
-  const images = (draft.images?.items || []).map((i: any) => i.url).filter(Boolean);
-  const avatar = draft.avatar_video?.status === "ready" && draft.avatar_video?.url ? [draft.avatar_video.url] : [];
-  const broll = (draft.broll?.clips || []).map((c: any) => c.url).filter(Boolean);
+  const imagesBlock = j(draft.images) || {};
+  const avatarBlock = j(draft.avatar_video) || {};
+  const brollBlock = j(draft.broll) || {};
+  const images = (imagesBlock.items || []).map((i: any) => i.url).filter(Boolean);
+  const avatar = avatarBlock.status === "ready" && avatarBlock.url ? [avatarBlock.url] : [];
+  const broll = (brollBlock.clips || []).map((c: any) => c.url).filter(Boolean);
   const videos = [...avatar, ...broll];
   if (pref === "text_only") return { images: [], videos: [] };
   return { images, videos };
