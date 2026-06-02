@@ -12,6 +12,7 @@ import { runResearch } from "./research.ts";
 import { runBootstrap } from "./bootstrap.ts";
 import { runImageGeneration, runAvatarVideo, runBroll } from "./media.ts";
 import { runPublish } from "./publish.ts";
+import { runDirectPublish } from "./direct-publish.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -140,7 +141,13 @@ async function processJob(job: any) {
     }
     case "publish": {
       const { profile } = await loadContext(job.user_id);
-      await runPublish({ admin, userId: job.user_id, draftId: job.draft_id, publishing: profile.publishing || {}, mode: job.mode, scheduledAt: job.scheduled_at });
+      const publishing = profile.publishing || {};
+      if (publishing.provider === "direct") {
+        // DIY direct-to-platform publishing (schedule handled by the queued-at job time upstream)
+        await runDirectPublish({ admin, userId: job.user_id, draftId: job.draft_id, mediaPreference: publishing.mediaPreference });
+      } else {
+        await runPublish({ admin, userId: job.user_id, draftId: job.draft_id, publishing, mode: job.mode, scheduledAt: job.scheduled_at });
+      }
       await finish();
       return;
     }

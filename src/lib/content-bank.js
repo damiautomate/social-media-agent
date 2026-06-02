@@ -375,3 +375,56 @@ export async function getStats(userId) {
   ]);
   return { pending, approved, published, ideas: ideasCount };
 }
+
+// ---------- social connections (DIY direct publishing) ----------
+import { encryptToken, decryptToken } from "./crypto.js";
+
+function mapConnectionSafe(row) {
+  // Safe fields only — never exposes tokens. For UI status display.
+  if (!row) return null;
+  return {
+    id: row.id, platform: row.platform, accountId: row.account_id,
+    accountName: row.account_name, accountUsername: row.account_username,
+    status: row.status, tokenExpiresAt: row.token_expires_at,
+    meta: row.meta || {}, lastError: row.last_error, createdAt: row.created_at,
+  };
+}
+
+export async function saveSocialConnection(userId, conn) {
+  const access = await encryptToken(conn.accessToken);
+  const refresh = conn.refreshToken ? await encryptToken(conn.refreshToken) : null;
+  const row = {
+    user_id: userId, platform: conn.platform, account_id: conn.accountId,
+    account_name: conn.accountName || null, account_username: conn.accountUsername || null,
+    access_token: access, refresh_token: refresh,
+    token_expires_at: conn.tokenExpiresAt || null, scope: conn.scope || null,
+    meta: conn.meta || {}, status: "active", last_error: null, updated_at: new Date().toISOString(),
+  };
+  await supabaseAdmin.from("social_connections")
+    .upsert(row, { onConflict: "user_id,platform,account_id" });
+}
+
+export async function listSocialConnections(userId) {
+  const { data } = await supabaseAdmin.from("social_connections")
+    .select("*").eq("user_id", userId).order("created_at", { ascending: false });
+  return (data || []).map(mapConnectionSafe);
+}
+
+// Returns the connection WITH decrypted tokens — server/edge use only (publishing).
+export async function getSocialConnectionWithTokens(userId, platform) {
+  const { data } = await supabaseAdmin.from("social_connections")
+    .select("*").eq("user_id", userId).eq("platform", platform).eq("status", "active")
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (!data) return null;
+  return {
+    id: data.id, platform: data.platform, accountId: data.account_id,
+    accountName: data.account_name, meta: data.meta || {},
+    scope: data.scope, tokenExpiresAt: data.token_expires_at,
+    accessToken: await decryptToken(data.access_token),
+    refreshToken: data.refresh_token ? await decryptToken(data.refresh_token) : null,
+  };
+}
+
+export async function deleteSocialConnection(userId, platform) {
+  await supabaseAdmin.from("social_connections").delete().eq("user_id", userId).eq("platform", platform);
+}

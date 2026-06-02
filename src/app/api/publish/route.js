@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyAuth } from "@/lib/auth-helpers.js";
-import { getUser, getDraft, createPendingJob, updateDraft } from "@/lib/content-bank.js";
+import { getUser, getDraft, createPendingJob, updateDraft, getSocialConnectionWithTokens } from "@/lib/content-bank.js";
 
 export async function POST(request) {
   const auth = await verifyAuth(request);
@@ -25,14 +25,21 @@ export async function POST(request) {
 
   const user = await getUser(auth.userId);
   const pub = user?.publishing || {};
-  if (!pub.provider) return NextResponse.json({ error: "No publishing provider configured. Set up Postiz in Settings." }, { status: 400 });
-  if (pub.provider === "postiz" && (!pub.postiz?.apiKey || !pub.postiz?.baseUrl)) {
-    return NextResponse.json({ error: "Postiz config incomplete. Settings → Publishing." }, { status: 400 });
-  }
+  if (!pub.provider) return NextResponse.json({ error: "No publishing provider configured. Choose Postiz or Direct in Settings → Publishing." }, { status: 400 });
   const targetKey = String(draft.platform || "").toLowerCase();
-  const integrations = Array.isArray(pub.integrations) ? pub.integrations : [];
-  if (!integrations.some((i) => (i.platformKey || "").toLowerCase() === targetKey)) {
-    return NextResponse.json({ error: `No Postiz integration mapped for platform "${draft.platform}". Settings → Publishing → Platform mappings.` }, { status: 400 });
+
+  if (pub.provider === "direct") {
+    // DIY: require a connected channel for this platform
+    const conn = await getSocialConnectionWithTokens(auth.userId, targetKey);
+    if (!conn) return NextResponse.json({ error: `No connected ${draft.platform} account. Settings → Channels → Connect.` }, { status: 400 });
+  } else {
+    if (!pub.postiz?.apiKey || !pub.postiz?.baseUrl) {
+      return NextResponse.json({ error: "Postiz config incomplete. Settings → Publishing." }, { status: 400 });
+    }
+    const integrations = Array.isArray(pub.integrations) ? pub.integrations : [];
+    if (!integrations.some((i) => (i.platformKey || "").toLowerCase() === targetKey)) {
+      return NextResponse.json({ error: `No Postiz integration mapped for platform "${draft.platform}". Settings → Publishing → Platform mappings.` }, { status: 400 });
+    }
   }
 
   if (draft.status !== "approved") {

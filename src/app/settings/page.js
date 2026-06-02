@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase-client.js";
 import { AppShell } from "@/components/AppShell.js";
 
 const TABS = [
+  { key: "channels", label: "Channels" },
   { key: "keys", label: "AI Keys" },
   { key: "media", label: "Media & Video" },
   { key: "publishing", label: "Publishing" },
@@ -52,9 +53,22 @@ export default function SettingsPage() {
   const [postizHasKey, setPostizHasKey] = useState(false);
   const [postizIntegrations, setPostizIntegrations] = useState([]);
   const [postizMsg, setPostizMsg] = useState({ ok: "", err: "" });
+  const [pubProvider, setPubProvider] = useState("direct");
 
   const [savingBrand, setSavingBrand] = useState(false);
   const [brandMsg, setBrandMsg] = useState({ ok: "", err: "" });
+
+  // DIY social channel connections
+  const [connections, setConnections] = useState([]);
+  const [connBusy, setConnBusy] = useState("");
+  const [connMsg, setConnMsg] = useState({ ok: "", err: "" });
+
+  const CHANNELS = [
+    { key: "linkedin", label: "LinkedIn", note: "Posts to your personal profile" },
+    { key: "facebook", label: "Facebook", note: "Posts to a Facebook Page you manage" },
+    { key: "instagram", label: "Instagram", note: "Requires an IG Business account linked to a Page" },
+    { key: "tiktok", label: "TikTok", note: "Video only · posts private until your app passes TikTok audit" },
+  ];
 
   useEffect(() => {
     let mounted = true;
@@ -88,10 +102,12 @@ export default function SettingsPage() {
       if (cl.cloudName) setCloudInput((s) => ({ ...s, cloudName: cl.cloudName, folder: cl.folder || "social-agent" }));
       setHasHeygen(!!hg.hasKey); setHeygenMasked(hg.masked);
       setHasFalai(!!fal.hasKey); setFalaiMasked(fal.masked);
+      setPubProvider(postiz?.provider || "direct");
       setPostizMasked(postiz?.postiz?.masked || null);
       setPostizHasKey(!!postiz?.postiz?.hasKey);
       setPostizInput({ baseUrl: postiz?.postiz?.baseUrl || "", apiKey: "" });
       setPostizIntegrations(Array.isArray(postiz.integrations) ? postiz.integrations : []);
+      fetch("/api/connections", { headers: h }).then((r) => r.json()).then((c) => setConnections(c.connections || [])).catch(() => {});
       const av = cfg.brandConfig?.videoStyle?.avatar;
       if (av) setHeygenSel({ avatarId: av.avatarId || "", avatarType: av.avatarType || "avatar", voiceId: av.voiceId || "" });
     })();
@@ -165,6 +181,10 @@ export default function SettingsPage() {
     if (res.ok) { setPostizHasKey(true); setPostizMasked(d.masked); setPostizIntegrations(d.integrations || []); setPostizInput({ baseUrl: postizInput.baseUrl, apiKey: "" }); setPostizMsg({ ok: `Connected. ${(d.integrations || []).length} integration(s). Map each below.`, err: "" }); }
     else setPostizMsg({ ok: "", err: d.error + (d.detail ? `: ${d.detail}` : "") });
   }
+  async function changeProvider(provider) {
+    setPubProvider(provider);
+    await authedFetch("/api/publishing-provider", { method: "POST", body: JSON.stringify({ provider }) });
+  }
   function updateIntegrationKey(integrationId, platformKey) {
     setPostizIntegrations(postizIntegrations.map((i) => i.integrationId === integrationId ? { ...i, platformKey } : i));
   }
@@ -175,6 +195,33 @@ export default function SettingsPage() {
     if (res.ok) { setPostizIntegrations(d.integrations || []); setPostizMsg({ ok: "Platform mappings saved.", err: "" }); }
     else setPostizMsg({ ok: "", err: d.error || "Save failed" });
   }
+  async function refreshConnections() {
+    const token = await getToken();
+    const res = await fetch("/api/connections", { headers: { Authorization: `Bearer ${token}` } });
+    if (res.ok) { const c = await res.json(); setConnections(c.connections || []); }
+  }
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("connected")) { setTab("channels"); setConnMsg({ ok: `${p.get("connected")} connected.`, err: "" }); window.history.replaceState({}, "", "/settings"); }
+    else if (p.get("channel_error")) { setTab("channels"); setConnMsg({ ok: "", err: decodeURIComponent(p.get("channel_error")) }); window.history.replaceState({}, "", "/settings"); }
+  }, []);
+  async function connectChannel(platform) {
+    setConnMsg({ ok: "", err: "" }); setConnBusy(platform);
+    const res = await authedFetch(`/api/connect/${platform}/start`);
+    const d = await res.json().catch(() => ({}));
+    setConnBusy("");
+    if (res.ok && d.url) window.location.href = d.url;
+    else setConnMsg({ ok: "", err: d.error || "Could not start connection" });
+  }
+  async function disconnectChannel(platform) {
+    if (!confirm(`Disconnect ${platform}?`)) return;
+    setConnBusy(platform);
+    await authedFetch("/api/connections", { method: "DELETE", body: JSON.stringify({ platform }) });
+    setConnBusy("");
+    refreshConnections();
+  }
+
   function setIdentity(field, value) { setConfig({ ...config, identity: { ...(config.identity || {}), [field]: value } }); }
   function setVoiceField(field, value) { setConfig({ ...config, voice: { ...(config.voice || {}), [field]: value } }); }
   async function saveBrand() {
@@ -214,6 +261,44 @@ export default function SettingsPage() {
             <button key={t.key} className={`tabpill ${tab === t.key ? "active" : ""}`} onClick={() => setTab(t.key)}>{t.label}</button>
           ))}
         </div>
+
+        {/* ===== CHANNELS (DIY direct publishing) ===== */}
+        {tab === "channels" ? (
+          <div className="card card-pad">
+            <h2 className="section-title">Connected channels</h2>
+            <p className="section-desc">Connect your own social accounts for direct publishing — no third-party scheduler. Each connects with one tap once your platform apps are approved.</p>
+            <Msg m={connMsg} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
+              {CHANNELS.map((ch) => {
+                const conn = connections.find((c) => c.platform === ch.key);
+                return (
+                  <div key={ch.key} className="int-row" style={{ alignItems: "flex-start" }}>
+                    <span className="dot" style={{ background: conn ? "var(--mint)" : "var(--ink-4)", width: 10, height: 10, marginTop: 6 }} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, color: "var(--ink)", fontWeight: 600 }}>{ch.label}</div>
+                      {conn ? (
+                        <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 2 }}>
+                          {conn.accountName || "Connected"}{conn.accountUsername ? ` · @${conn.accountUsername}` : ""}
+                          {conn.tokenExpiresAt ? ` · token expires ${new Date(conn.tokenExpiresAt).toLocaleDateString()}` : ""}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{ch.note}</div>
+                      )}
+                    </div>
+                    {conn ? (
+                      <button className="btn btn-sm btn-rose" disabled={connBusy === ch.key} onClick={() => disconnectChannel(ch.key)}>Disconnect</button>
+                    ) : (
+                      <button className="btn btn-sm btn-primary" disabled={connBusy === ch.key} onClick={() => connectChannel(ch.key)}>{connBusy === ch.key ? "…" : "Connect"}</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="note note-info" style={{ marginTop: 16 }}>
+              Direct publishing requires your own approved developer apps per platform. See the setup checklist (DIY_PLATFORM_SETUP.md) for exactly what to register.
+            </div>
+          </div>
+        ) : null}
 
         {/* ===== AI KEYS ===== */}
         {tab === "keys" ? (
@@ -307,7 +392,21 @@ export default function SettingsPage() {
 
         {/* ===== PUBLISHING ===== */}
         {tab === "publishing" ? (
+          <>
           <div className="card card-pad">
+            <h2 className="section-title">Publishing method</h2>
+            <p className="section-desc">Direct = post straight to platforms with your own connected channels (Settings → Channels). Postiz = route through a Postiz instance.</p>
+            <div className="seg" style={{ display: "flex", marginBottom: 18 }}>
+              <button className={`seg-btn ${pubProvider === "direct" ? "active" : ""}`} style={{ flex: 1 }} onClick={() => changeProvider("direct")}>Direct (DIY)</button>
+              <button className={`seg-btn ${pubProvider === "postiz" ? "active" : ""}`} style={{ flex: 1 }} onClick={() => changeProvider("postiz")}>Postiz</button>
+            </div>
+            {pubProvider === "direct" ? (
+              <div className="note note-info" style={{ marginTop: 0 }}>Direct publishing is on. Connect your accounts under <strong>Settings → Channels</strong>, then use Post now / Schedule on any draft.</div>
+            ) : null}
+          </div>
+
+          {pubProvider === "postiz" ? (
+          <div className="card card-pad" style={{ marginTop: 14 }}>
             <h2 className="section-title">Postiz</h2>
             <p className="section-desc">One API for LinkedIn, IG, TikTok, FB & more. Connect your accounts inside Postiz first, then paste your key here.</p>
             <div className="field"><label className="label">Postiz base URL</label><input className="input" value={postizInput.baseUrl} onChange={(e) => setPostizInput({ ...postizInput, baseUrl: e.target.value })} placeholder="https://api.postiz.com or your self-host URL" /></div>
@@ -340,6 +439,8 @@ export default function SettingsPage() {
             </div>
             <button className="btn btn-ghost" disabled={savingBrand} onClick={saveBrand}>{savingBrand ? "Saving…" : "Save preference"}</button>
           </div>
+          ) : null}
+          </>
         ) : null}
 
         {/* ===== BRAND VOICE ===== */}
