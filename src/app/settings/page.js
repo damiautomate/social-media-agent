@@ -224,6 +224,7 @@ export default function SettingsPage() {
 
   function setIdentity(field, value) { setConfig({ ...config, identity: { ...(config.identity || {}), [field]: value } }); }
   function setVoiceField(field, value) { setConfig({ ...config, voice: { ...(config.voice || {}), [field]: value } }); }
+  function setVisualField(field, value) { setConfig({ ...config, visualStyle: { ...(config.visualStyle || {}), [field]: value } }); }
   async function saveBrand() {
     setSavingBrand(true); setBrandMsg({ ok: "", err: "" });
     const res = await authedFetch("/api/brand-config", { method: "PUT", body: JSON.stringify({
@@ -446,6 +447,31 @@ export default function SettingsPage() {
         {/* ===== BRAND VOICE ===== */}
         {tab === "brand" ? (
           <>
+            <div className="card card-pad" style={{ marginBottom: 14 }}>
+              <h2 className="section-title">Post images</h2>
+              <p className="section-desc">How generated post images look. Branded design cards (recommended) render your hook as clean typography on your brand colors — what a designer would make, and the strongest-performing format. Photo mode generates a realistic photograph instead.</p>
+              <div className="seg" style={{ display: "flex", marginBottom: 14 }}>
+                <button className={`seg-btn ${(config.visualStyle?.imageStyle || "branded") !== "photo" ? "active" : ""}`} style={{ flex: 1 }} onClick={() => setVisualField("imageStyle", "branded")}>Branded card</button>
+                <button className={`seg-btn ${config.visualStyle?.imageStyle === "photo" ? "active" : ""}`} style={{ flex: 1 }} onClick={() => setVisualField("imageStyle", "photo")}>Photo</button>
+              </div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <div className="field" style={{ flex: 1, minWidth: 130 }}>
+                  <label className="label">Background color</label>
+                  <input className="input" value={config.visualStyle?.bgColor || "#0E1116"} onChange={(e) => setVisualField("bgColor", e.target.value)} placeholder="#0E1116" />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 130 }}>
+                  <label className="label">Accent color</label>
+                  <input className="input" value={config.visualStyle?.accentColor || "#8B5CF6"} onChange={(e) => setVisualField("accentColor", e.target.value)} placeholder="#8B5CF6" />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 130 }}>
+                  <label className="label">Text color</label>
+                  <input className="input" value={config.visualStyle?.textColor || "#F4F4F6"} onChange={(e) => setVisualField("textColor", e.target.value)} placeholder="#F4F4F6" />
+                </div>
+              </div>
+              <button className="btn btn-primary" disabled={savingBrand} onClick={saveBrand}>{savingBrand ? "Saving…" : "Save image style"}</button>
+              <Msg m={brandMsg} />
+            </div>
+
             <div className="card card-pad" style={{ marginBottom: 14 }}>
               <h2 className="section-title">Identity</h2>
               <div className="field"><label className="label">Name</label><input className="input" value={config.identity?.name || ""} onChange={(e) => setIdentity("name", e.target.value)} /></div>
