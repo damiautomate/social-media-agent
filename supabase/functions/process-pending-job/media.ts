@@ -47,16 +47,16 @@ function resolveBrand(brandConfig: any) {
   const vs = brandConfig.visualStyle || brandConfig.visual_style || {};
   const id = brandConfig.identity || {};
   const palette = Array.isArray(vs.colorPalette) ? vs.colorPalette : [];
-  // defaults — a clean dark editorial look; override via Settings → Brand (visualStyle.colorPalette)
   const bg = vs.bgColor || palette[0] || "#0E1116";
   const accent = vs.accentColor || palette[1] || "#8B5CF6";
   const text = vs.textColor || "#F4F4F6";
   const muted = "#9AA0AA";
-  const handle = id.handle ? `@${String(id.handle).replace(/^@/, "")}` : (id.name || "");
-  return { bg, accent, text, muted, handle, name: id.name || "" };
+  const name = id.name || "";
+  const handle = id.handle ? `@${String(id.handle).replace(/^@/, "")}` : "";
+  const signature = [name, handle].filter(Boolean).join("  |  ");
+  return { bg, accent, text, muted, name, handle, signature };
 }
 
-// portrait for carousel/IG, square otherwise
 function cardDims(draft: any): { w: number; h: number } {
   const fmt = (draft.format_type || "").toLowerCase();
   const platform = (draft.platform || "").toLowerCase();
@@ -70,29 +70,6 @@ function hexToRgb(hex: string): string {
   return v.slice(0, 6).toLowerCase();
 }
 
-// Build the (text-free) vector background. Gradient + accent bar + footer rule + brand mark.
-function buildCardBackgroundSvg(brand: any, w: number, h: number): string {
-  const pad = Math.round(w * 0.08);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="${brand.bg}"/>
-      <stop offset="1" stop-color="${shade(brand.bg, -12)}"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="0.85" cy="0.1" r="0.7">
-      <stop offset="0" stop-color="${brand.accent}" stop-opacity="0.16"/>
-      <stop offset="1" stop-color="${brand.accent}" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-  <rect width="${w}" height="${h}" fill="url(#bg)"/>
-  <rect width="${w}" height="${h}" fill="url(#glow)"/>
-  <rect x="${pad}" y="${pad}" width="64" height="8" rx="4" fill="${brand.accent}"/>
-  <rect x="${pad}" y="${h - pad - 2}" width="${w - pad * 2}" height="2" fill="${brand.accent}" fill-opacity="0.35"/>
-  <circle cx="${w - pad - 10}" cy="${h - pad - 6}" r="10" fill="${brand.accent}"/>
-</svg>`;
-}
-
-// lighten/darken a hex by percent (-100..100)
 function shade(hex: string, pct: number): string {
   const h = hexToRgb(hex);
   const num = parseInt(h, 16);
@@ -103,47 +80,134 @@ function shade(hex: string, pct: number): string {
   return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
 }
 
-// Encode text for a Cloudinary l_text layer.
-// Cloudinary decodes the path once, then its text parser treats , and / specially —
-// so those must be DOUBLE-encoded (%252C / %252F) to survive as literal characters.
 function encodeOverlayText(s: string): string {
-  const cleaned = (s || "")
-    .replace(/[\r\n]+/g, " ")   // single line; wrapping is handled by w_/c_fit
-    .replace(/\s+/g, " ")
-    .trim();
+  const cleaned = (s || "").replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
   return encodeURIComponent(cleaned)
-    .replace(/%2C/g, "%252C")   // comma
-    .replace(/%2F/g, "%252F")   // slash
-    .replace(/%5C/g, "%255C");  // backslash
+    .replace(/%2C/g, "%252C").replace(/%2F/g, "%252F").replace(/%5C/g, "%255C");
 }
 
-// Choose a headline font size based on length so it fits the card
+// Big, frame-filling headline sizes (the old sizes were far too small → empty cards)
 function headlineSize(len: number, w: number): number {
-  if (len <= 60) return Math.round(w * 0.075);
-  if (len <= 110) return Math.round(w * 0.060);
-  if (len <= 170) return Math.round(w * 0.050);
-  return Math.round(w * 0.042);
+  if (len <= 28) return Math.round(w * 0.115);
+  if (len <= 45) return Math.round(w * 0.095);
+  if (len <= 70) return Math.round(w * 0.078);
+  if (len <= 100) return Math.round(w * 0.064);
+  if (len <= 140) return Math.round(w * 0.054);
+  return Math.round(w * 0.046);
 }
 
-// Build the final Cloudinary delivery URL: base SVG + text overlays.
-function buildCardUrl(cloudName: string, basePublicId: string, brand: any, headline: string, w: number, h: number): string {
-  const pad = Math.round(w * 0.08);
+// ---- AI designs the card: picks a layout + writes punchy display copy ----
+async function buildCardSpec(apiKey: string, draft: any): Promise<any> {
+  const system = [
+    "You are an expert social-media graphic designer creating ONE branded image card for a post.",
+    "Pick the layout that best fits the post, then write SHORT display copy (this is a big graphic, not a paragraph).",
+    "",
+    "Layouts:",
+    '- "stat": use when the post hinges on a striking number/percentage/metric.',
+    '- "quote": use when one punchy opinion or insight reads great as a bold standalone line.',
+    '- "statement": default — a strong declarative hook.',
+    "",
+    "Rules:",
+    "- headline: MAX 90 characters. Punchy, high-contrast, rewritten for impact — NOT the raw post text. No hashtags, no emojis.",
+    "- eyebrow: 1-3 word topic tag (e.g. 'CRM Strategy'). Optional but preferred.",
+    "- For stat: provide stat.value (e.g. '79%', '3x', '$2M') and stat.caption (<= 55 chars). headline becomes a short supporting line.",
+    "- subtext: optional supporting line <= 70 chars.",
+    "- Keep it tight. Big and bold beats long.",
+    "",
+    "Respond with ONLY this JSON (no prose, no fences):",
+    '{ "layout": "statement|quote|stat", "eyebrow": "", "headline": "", "subtext": "", "stat": { "value": "", "caption": "" } }',
+  ].join("\n");
+  const user = `Platform: ${draft.platform}\nPost:\n${(draft.post_text || "").slice(0, 1400)}\n\nDesign the card. JSON only.`;
+  try {
+    const { text } = await anthropicMessage(apiKey, { system, user, maxTokens: 600 });
+    const spec = extractJson(text);
+    return {
+      layout: ["statement", "quote", "stat"].includes(spec.layout) ? spec.layout : "statement",
+      eyebrow: (spec.eyebrow || "").toString().slice(0, 40),
+      headline: (spec.headline || "").toString().slice(0, 120),
+      subtext: (spec.subtext || "").toString().slice(0, 90),
+      stat: spec.stat && spec.stat.value ? { value: String(spec.stat.value).slice(0, 12), caption: String(spec.stat.caption || "").slice(0, 70) } : null,
+    };
+  } catch {
+    // Fallback to the hook if the model call/parse fails
+    const hook = (draft.hook_preview || (draft.post_text || "").split("\n").filter(Boolean)[0] || "").slice(0, 110);
+    return { layout: "statement", eyebrow: (draft.pillar || "").toString().slice(0, 40), headline: hook, subtext: "", stat: null };
+  }
+}
+
+// Layout-aware vector background (no text → no font dependency for the bg)
+function buildCardBackgroundSvg(brand: any, layout: string, w: number, h: number): string {
+  const pad = Math.round(w * 0.085);
+  const accent = brand.accent;
+  let flourish = "";
+  if (layout === "quote") {
+    // big quotation mark glyph drawn as shapes, top-left, low opacity
+    const qx = pad, qy = Math.round(h * 0.16), s = Math.round(w * 0.12);
+    const mark = (ox: number) =>
+      `<path d="M ${ox} ${qy + s} C ${ox} ${qy + s * 0.35}, ${ox + s * 0.35} ${qy}, ${ox + s * 0.55} ${qy} L ${ox + s * 0.55} ${qy + s * 0.32} C ${ox + s * 0.42} ${qy + s * 0.32}, ${ox + s * 0.3} ${qy + s * 0.5}, ${ox + s * 0.3} ${qy + s} Z" fill="${accent}" fill-opacity="0.9"/>`;
+    flourish = `${mark(qx)}${mark(qx + s * 0.7)}`;
+  } else if (layout === "stat") {
+    // accent arc ring reminiscent of a progress dial, upper area
+    const cx = Math.round(w * 0.30), cy = Math.round(h * 0.34), r = Math.round(w * 0.16);
+    flourish = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${shade(brand.bg, 18)}" stroke-width="14"/>
+      <path d="M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx - r * 0.6} ${cy + r * 0.8}" fill="none" stroke="${accent}" stroke-width="14" stroke-linecap="round"/>`;
+  } else {
+    flourish = `<rect x="${pad}" y="${Math.round(h * 0.24)}" width="72" height="9" rx="4" fill="${accent}"/>`;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="${shade(brand.bg, 6)}"/>
+      <stop offset="1" stop-color="${shade(brand.bg, -14)}"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.88" cy="0.08" r="0.85">
+      <stop offset="0" stop-color="${accent}" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="${accent}" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="${w}" height="${h}" fill="url(#bg)"/>
+  <rect width="${w}" height="${h}" fill="url(#glow)"/>
+  ${flourish}
+  <rect x="${pad}" y="${h - Math.round(pad * 0.62)}" width="${w - pad * 2}" height="3" rx="1.5" fill="${accent}" fill-opacity="0.4"/>
+</svg>`;
+}
+
+// Build the Cloudinary delivery URL with text overlays for the chosen layout.
+function buildCardUrl(cloudName: string, basePublicId: string, brand: any, spec: any, w: number, h: number): string {
+  const pad = Math.round(w * 0.085);
   const wrapW = w - pad * 2;
-  const hl = headline.slice(0, 200);
-  const fs = headlineSize(hl.length, w);
   const textRgb = hexToRgb(brand.text);
+  const accentRgb = hexToRgb(brand.accent);
   const mutedRgb = hexToRgb(brand.muted);
+  const layers = [`c_fill,w_${w},h_${h}`];
 
-  // Headline: wrapped, positioned below the accent bar (wrapped text left-aligns by default)
-  const headlineLayer =
-    `l_text:${CARD_FONT}_${fs}_bold:${encodeOverlayText(hl)},co_rgb:${textRgb},w_${wrapW},c_fit,g_north_west,x_${pad},y_${Math.round(h * 0.22)}`;
+  const L = (font: number, weight: string, text: string, color: string, opts: string) =>
+    `l_text:${CARD_FONT}_${font}_${weight}:${encodeOverlayText(text)},co_rgb:${color}${opts}`;
 
-  const layers = [`c_fill,w_${w},h_${h}`, headlineLayer];
+  // Eyebrow (top)
+  if (spec.eyebrow) {
+    layers.push(L(Math.round(w * 0.03), "bold", spec.eyebrow.toUpperCase(), accentRgb, `,g_north_west,x_${pad},y_${Math.round(h * 0.13)},w_${wrapW},c_fit`));
+  }
 
-  // Footer handle
-  if (brand.handle) {
-    const handleFs = Math.round(w * 0.026);
-    layers.push(`l_text:${CARD_FONT}_${handleFs}_bold:${encodeOverlayText(brand.handle)},co_rgb:${mutedRgb},g_south_west,x_${pad},y_${Math.round(pad * 0.85)}`);
+  if (spec.layout === "stat" && spec.stat) {
+    // HUGE stat value, then caption, then supporting headline — vertically arranged
+    layers.push(L(Math.round(w * 0.22), "bold", spec.stat.value, accentRgb, `,g_north_west,x_${pad},y_${Math.round(h * 0.26)}`));
+    if (spec.stat.caption) layers.push(L(Math.round(w * 0.045), "bold", spec.stat.caption, textRgb, `,g_north_west,x_${pad},y_${Math.round(h * 0.50)},w_${wrapW},c_fit`));
+    if (spec.headline) layers.push(L(Math.round(w * 0.038), "normal", spec.headline, mutedRgb, `,g_north_west,x_${pad},y_${Math.round(h * 0.64)},w_${wrapW},c_fit`));
+  } else {
+    // statement / quote — big centered headline (quote uses accent color)
+    const hl = spec.headline || "";
+    const fs = headlineSize(hl.length, w);
+    const color = spec.layout === "quote" ? accentRgb : textRgb;
+    layers.push(L(fs, "bold", hl, color, `,g_center,y_-${Math.round(h * 0.03)},w_${wrapW},c_fit`));
+    if (spec.subtext) {
+      layers.push(L(Math.round(w * 0.036), "normal", spec.subtext, mutedRgb, `,g_center,y_${Math.round(h * 0.20)},w_${wrapW},c_fit`));
+    }
+  }
+
+  // Signature (bottom)
+  if (brand.signature) {
+    layers.push(L(Math.round(w * 0.027), "bold", brand.signature, mutedRgb, `,g_south_west,x_${pad},y_${Math.round(pad * 0.7)}`));
   }
 
   return `https://res.cloudinary.com/${encodeURIComponent(cloudName)}/image/upload/${layers.join("/")}/${basePublicId}.png`;
@@ -154,29 +218,28 @@ async function renderBrandedCards({ admin, draft, brandConfig, keys }: any) {
   const { w, h } = cardDims(draft);
   const folder = `${keys.cloudinaryFolder || "social-agent"}/drafts/${draft.id}`;
 
-  // The headline text = the hook (first strong line), falling back to the post opening.
-  const headline = (draft.hook_preview || (draft.post_text || "").split("\n").filter(Boolean)[0] || "").slice(0, 200);
+  // 1) AI designs the card (layout + display copy)
+  const spec = await buildCardSpec(keys.anthropic, draft);
 
-  // 1) upload the text-free vector background (data URI; Cloudinary rasterizes SVG)
-  const svg = buildCardBackgroundSvg(brand, w, h);
+  // 2) upload the layout-aware vector background
+  const svg = buildCardBackgroundSvg(brand, spec.layout, w, h);
   const dataUri = `data:image/svg+xml;base64,${base64Encode(svg)}`;
   const uploaded = await uploadToCloudinary({
     cloudName: keys.cloudinaryCloud, apiKey: keys.cloudinaryKey, apiSecret: keys.cloudinarySecret,
     file: dataUri, folder, publicId: "card-bg", resourceType: "image",
   });
 
-  // 2) build the delivery URL with text overlays
-  const url = buildCardUrl(keys.cloudinaryCloud, uploaded.publicId, brand, headline, w, h);
+  // 3) build the delivery URL with text overlays
+  const url = buildCardUrl(keys.cloudinaryCloud, uploaded.publicId, brand, spec, w, h);
 
   return [{
     slot: "cover", url, cloudinaryPublicId: uploaded.publicId,
     width: w, height: h, model: "branded-card", size: `${w}x${h}`,
-    style: "branded", headline, generatedAt: Date.now(),
+    style: "branded", layout: spec.layout, headline: spec.headline, generatedAt: Date.now(),
   }];
 }
 
 function base64Encode(s: string): string {
-  // UTF-8 safe base64 for Deno
   const bytes = new TextEncoder().encode(s);
   let bin = "";
   for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
@@ -193,21 +256,21 @@ function imagePrompterSystem(brandConfig: any): string {
   if (Array.isArray(visualStyle.avoidElements) && visualStyle.avoidElements.length) aestheticLines.push(`Avoid: ${visualStyle.avoidElements.join("; ")}`);
   const aestheticBlock = aestheticLines.length ? aestheticLines.join("\n") : "No specific visual style configured — default to clean, modern, content-focused imagery.";
   return [
-    `You are writing image generation prompts for ${identity.name || "this creator"}'s social media posts.`,
+    `You are an award-winning editorial photo director choosing the cover image for ${identity.name || "this creator"}'s social posts.`,
     "", "## Visual brand", aestheticBlock,
-    "", "## CRITICAL: authentic realism, NOT AI-looking imagery",
-    "The #1 failure mode is images that look obviously AI-generated — over-polished, glossy, too-perfect, glowing screens, plastic skin, surreal lighting. On LinkedIn in 2026 this kills credibility. Every prompt MUST aim for authentic, documentary, editorial-grade photography that looks like a real photographer shot it.",
-    "Bake these into EVERY prompt: shot on a real camera (e.g. 35mm/50mm prime, natural depth of field), natural or available light, realistic imperfect textures, candid composition, true-to-life color. Real environments, real wear, real materials.",
-    "Explicitly AVOID and negative-prompt: 3D render, CGI, digital art, glossy, hyper-saturated, neon glow, glowing holographic UI/dashboards, floating data, plastic/waxy skin, perfect symmetry, stock-photo staging, lens flare, 'futuristic' clichés, text/letters/numbers.",
-    "", "## Your job", "For each slot listed in the user message, write ONE detailed image prompt suitable for a high-quality text-to-image model.",
+    "", "## Approach: CONCEPTUAL & EDITORIAL — not literal, not stocky",
+    "Do NOT illustrate the post literally (no 'person at a laptop', no 'team in a meeting', no generic office). Instead, find ONE strong CONCEPTUAL image — a metaphor or visual idea — that captures the post's core THESIS, the way a great magazine or a brand like Stripe/Apple would.",
+    "Think: a single striking subject or object, bold composition, intentional negative space, editorial lighting. The image should make someone stop and think, and it should still make sense paired with the post's idea.",
+    "Aim for authentic, photographic realism (shot on a real camera, natural/studio light, real textures) OR a clean conceptual still-life / minimal scene. Either way it must look intentional and art-directed, never like a stock photo.",
+    "Explicitly AVOID: literal depictions of the post's words, generic office/laptop/handshake stock scenes, 3D render, CGI, glossy hyper-saturation, neon glow, glowing holographic dashboards, floating data, plastic skin, lens flare, 'futuristic tech' clichés, and any text/letters/numbers.",
+    "", "## Your job", "For each slot listed in the user message, write ONE image prompt for a high-quality text-to-image model.",
     "", "Rules for each prompt:",
-    "1. 30-80 words. Specific, visual, scene-driven — a real photographic moment.",
-    "2. NEVER include text/typography in the image. No words, captions, titles, watermarks, signage, or readable text of any kind.",
-    "3. Anchor the visual to the slot's contextText, but translate it into a real-world SCENE, not a literal illustration.",
-    "4. Lead with photographic realism cues (camera, lens, light, texture) and the brand palette as subtle color grading — coherent set across slots.",
-    "5. For carousels, vary scenes across slides while keeping one consistent photographic look — same world, different shots.",
-    "6. End each prompt with a short negative clause, e.g. 'No CGI, no glossy 3D, no glowing screens, no text.'",
-    "7. Prefer real people mid-action in natural settings (anonymous, no specific identity/celebrity) or authentic objects/workspaces — avoid empty 'tech abstract' scenes.",
+    "1. 35-80 words. Start by naming the CONCEPT/metaphor, then describe the single hero subject, composition, lighting, and mood.",
+    "2. NEVER include text/typography in the image.",
+    "3. Reserve clean negative space (top or one side) so it composes well in-feed.",
+    "4. Apply the brand palette subtly as color grading. Keep a consistent art-directed look across slots.",
+    "5. If a person appears, anonymous and incidental (no faces front-and-center, no specific identity/celebrity).",
+    "6. End every prompt with: 'Editorial photography, art-directed, authentic texture. No CGI, no 3D render, no glossy gradients, no glowing screens, no text.'",
     "", "## Output format", "Respond with ONLY a single JSON object, no prose, no fences:",
     `{ "prompts": [ { "slot": "<the slot name from input>", "prompt": "<the image prompt>" } ] }`,
     "Order MUST match the input slot order. Return exactly one prompt per input slot.",
