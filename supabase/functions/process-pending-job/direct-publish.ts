@@ -239,11 +239,40 @@ export async function runDirectPublish({ admin, userId, draftId, mediaPreference
 
     const { postIds } = await publisher(conn, draft, mediaPreference || "video_first");
 
+    const now = new Date();
     await admin.from("drafts").update({
       status: "published",
-      publish: { status: "published", provider: "direct", providerPostIds: postIds, publishedAt: new Date().toISOString(), error: null },
-      published_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      publish: { status: "published", provider: "direct", providerPostIds: postIds, publishedAt: now.toISOString(), error: null },
+      published_at: now.toISOString(), updated_at: now.toISOString(),
     }).eq("id", draftId);
+
+    // ---- Learning loop (Phase A): stamp the post with its content variables ----
+    try {
+      const imgs = j(draft.images) || {};
+      const hasImages = Array.isArray(imgs.items) && imgs.items.length > 0;
+      const hasVideo = (j(draft.avatar_video) || {}).status === "ready" || ((j(draft.broll) || {}).clips || []).length > 0;
+      let mediaType = "text";
+      if (hasVideo) mediaType = "video";
+      else if (hasImages) mediaType = imgs.style === "branded" ? "branded_card" : "photo";
+      const tags = (j(draft.hashtags) || []);
+      await admin.from("post_performance").insert({
+        user_id: userId,
+        draft_id: draftId,
+        platform,
+        provider: "direct",
+        provider_post_id: (postIds && postIds[0]) || null,
+        media_type: mediaType,
+        card_layout: (hasImages && imgs.style === "branded") ? (imgs.items[0]?.layout || null) : null,
+        format_type: draft.format_type || null,
+        pillar: draft.pillar || null,
+        hashtags_count: Array.isArray(tags) ? tags.length : 0,
+        body_length: (draft.post_text || "").length,
+        posted_at: now.toISOString(),
+        posted_dow: now.getUTCDay(),
+        posted_hour: now.getUTCHours(),
+      });
+    } catch (e) { console.warn("post_performance insert skipped:", (e as Error).message); }
+
     return { ok: true, postIds };
   } catch (err) {
     await admin.from("drafts").update({
