@@ -449,10 +449,11 @@ export default function SettingsPage() {
           <>
             <div className="card card-pad" style={{ marginBottom: 14 }}>
               <h2 className="section-title">Post images</h2>
-              <p className="section-desc">How generated post images look. Branded design cards (recommended) render your hook as clean typography on your brand colors — what a designer would make, and the strongest-performing format. Photo mode generates a realistic photograph instead.</p>
-              <div className="seg" style={{ display: "flex", marginBottom: 14 }}>
-                <button className={`seg-btn ${(config.visualStyle?.imageStyle || "branded") !== "photo" ? "active" : ""}`} style={{ flex: 1 }} onClick={() => setVisualField("imageStyle", "branded")}>Branded card</button>
-                <button className={`seg-btn ${config.visualStyle?.imageStyle === "photo" ? "active" : ""}`} style={{ flex: 1 }} onClick={() => setVisualField("imageStyle", "photo")}>Photo</button>
+              <p className="section-desc">How generated post images look. Mix (recommended) rotates through all the branded card styles, the AI-rendered card, and the occasional photo — so the agent can learn what performs for you over time. Or pin one style.</p>
+              <div className="tabs-strip" style={{ marginBottom: 14 }}>
+                {[["mix", "Mix (recommended)"], ["branded", "Branded card"], ["ai_card", "AI card"], ["photo", "Photo"]].map(([v, label]) => (
+                  <button key={v} className={`tabpill ${(config.visualStyle?.imageStyle || "mix") === v ? "active" : ""}`} onClick={() => setVisualField("imageStyle", v)}>{label}</button>
+                ))}
               </div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <div className="field" style={{ flex: 1, minWidth: 130 }}>

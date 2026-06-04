@@ -43,18 +43,20 @@ function sizeFor(draft: any): string {
 // Cloudinary-supported Google fonts (safe choices)
 const CARD_FONT = "Montserrat";
 
-function resolveBrand(brandConfig: any) {
+function resolveBrand(brandConfig: any, theme = "dark") {
   const vs = brandConfig.visualStyle || brandConfig.visual_style || {};
   const id = brandConfig.identity || {};
   const palette = Array.isArray(vs.colorPalette) ? vs.colorPalette : [];
-  const bg = vs.bgColor || palette[0] || "#0E1116";
   const accent = vs.accentColor || palette[1] || "#8B5CF6";
-  const text = vs.textColor || "#F4F4F6";
-  const muted = "#9AA0AA";
+  const dark = vs.bgColor || palette[0] || "#0E1116";
+  const isLight = theme === "light";
+  const bg = isLight ? "#FBFBF9" : dark;
+  const text = isLight ? "#16161B" : (vs.textColor || "#F4F4F6");
+  const muted = isLight ? "#6B6B73" : "#9AA0AA";
   const name = id.name || "";
   const handle = id.handle ? `@${String(id.handle).replace(/^@/, "")}` : "";
   const signature = [name, handle].filter(Boolean).join("  |  ");
-  return { bg, accent, text, muted, name, handle, signature };
+  return { bg, accent, text, muted, name, handle, signature, isLight };
 }
 
 function cardDims(draft: any): { w: number; h: number } {
@@ -96,42 +98,53 @@ function headlineSize(len: number, w: number): number {
   return Math.round(w * 0.046);
 }
 
-// ---- AI designs the card: picks a layout + writes punchy display copy ----
-async function buildCardSpec(apiKey: string, draft: any): Promise<any> {
+// ---- AI designs the card: picks a layout + writes CURIOSITY-DRIVEN display copy ----
+async function buildCardSpec(apiKey: string, draft: any, forceLayout?: string): Promise<any> {
   const system = [
-    "You are an expert social-media graphic designer creating ONE branded image card for a post.",
-    "Pick the layout that best fits the post, then write SHORT display copy (this is a big graphic, not a paragraph).",
+    "You are an expert social-media graphic designer AND a sharp short-form copywriter. Design ONE branded image card for a post.",
     "",
-    "Layouts:",
-    '- "stat": use when the post hinges on a striking number/percentage/metric.',
-    '- "quote": use when one punchy opinion or insight reads great as a bold standalone line.',
-    '- "statement": default — a strong declarative hook.',
+    "## The text must create CURIOSITY — this is the most important rule.",
+    "The headline's job is to make someone STOP and NEED to read the post. Use open loops, a surprising claim, a tension, a 'wait, what?' — never a flat summary.",
+    "Good (curiosity): 'Your CRM isn't broken. Your data is lying to you.' / 'I deleted 40% of our automations. Revenue went up.' / 'Most funnels fail at a step nobody checks.'",
+    "Bad (flat): 'Tips for better CRM data.' / 'How automation helps your business.'",
+    "Do NOT give away the full answer on the card — tease it. Leave them wanting the post.",
     "",
-    "Rules:",
-    "- headline: MAX 90 characters. Punchy, high-contrast, rewritten for impact — NOT the raw post text. No hashtags, no emojis.",
-    "- eyebrow: 1-3 word topic tag (e.g. 'CRM Strategy'). Optional but preferred.",
-    "- For stat: provide stat.value (e.g. '79%', '3x', '$2M') and stat.caption (<= 55 chars). headline becomes a short supporting line.",
-    "- subtext: optional supporting line <= 70 chars.",
-    "- Keep it tight. Big and bold beats long.",
+    "## Pick the layout that best fits (vary across posts):",
+    '- "statement": a bold declarative curiosity hook.',
+    '- "quote": a punchy opinion that stings or surprises, reads great as a standalone line.',
+    '- "stat": when a striking number creates the intrigue.',
+    '- "highlight": a short hook where 1-2 key phrases get marker-highlighted for emphasis.',
+    "",
+    "## Rules:",
+    "- headline: MAX 85 chars. Punchy, curiosity-driven, rewritten for impact (NOT the raw post). No hashtags/emojis.",
+    "- eyebrow: 1-3 word topic tag.",
+    "- subtext: optional, <= 70 chars, adds intrigue (not explanation).",
+    "- stat layout: stat.value (e.g. '40%','3x') + stat.caption (<= 55 chars, curiosity-driven).",
+    "- highlight layout: ALSO return lines[] — the headline broken into 2-4 SHORT lines (each <= 22 chars), and highlight[] = the exact line strings (0-2 of them) to mark with the accent color.",
+    "- theme: 'dark' (default) or 'light' — pick 'light' occasionally for variety when it suits a punchy quote.",
     "",
     "Respond with ONLY this JSON (no prose, no fences):",
-    '{ "layout": "statement|quote|stat", "eyebrow": "", "headline": "", "subtext": "", "stat": { "value": "", "caption": "" } }',
+    '{ "layout": "statement|quote|stat|highlight", "theme": "dark|light", "eyebrow": "", "headline": "", "subtext": "", "stat": { "value": "", "caption": "" }, "lines": [], "highlight": [] }',
   ].join("\n");
-  const user = `Platform: ${draft.platform}\nPost:\n${(draft.post_text || "").slice(0, 1400)}\n\nDesign the card. JSON only.`;
+  const hint = forceLayout ? `\n\nPreferred layout for variety: ${forceLayout} (use it if it reasonably fits; otherwise pick the best).` : "";
+  const user = `Platform: ${draft.platform}\nPost:\n${(draft.post_text || "").slice(0, 1400)}${hint}\n\nDesign the card. Make the text create curiosity. JSON only.`;
   try {
-    const { text } = await anthropicMessage(apiKey, { system, user, maxTokens: 600 });
+    const { text } = await anthropicMessage(apiKey, { system, user, maxTokens: 700 });
     const spec = extractJson(text);
+    const layout = ["statement", "quote", "stat", "highlight"].includes(spec.layout) ? spec.layout : "statement";
     return {
-      layout: ["statement", "quote", "stat"].includes(spec.layout) ? spec.layout : "statement",
+      layout,
+      theme: spec.theme === "light" ? "light" : "dark",
       eyebrow: (spec.eyebrow || "").toString().slice(0, 40),
-      headline: (spec.headline || "").toString().slice(0, 120),
+      headline: (spec.headline || "").toString().slice(0, 110),
       subtext: (spec.subtext || "").toString().slice(0, 90),
       stat: spec.stat && spec.stat.value ? { value: String(spec.stat.value).slice(0, 12), caption: String(spec.stat.caption || "").slice(0, 70) } : null,
+      lines: Array.isArray(spec.lines) ? spec.lines.map((l: any) => String(l).slice(0, 28)).slice(0, 4) : [],
+      highlight: Array.isArray(spec.highlight) ? spec.highlight.map((l: any) => String(l).slice(0, 28)).slice(0, 2) : [],
     };
   } catch {
-    // Fallback to the hook if the model call/parse fails
-    const hook = (draft.hook_preview || (draft.post_text || "").split("\n").filter(Boolean)[0] || "").slice(0, 110);
-    return { layout: "statement", eyebrow: (draft.pillar || "").toString().slice(0, 40), headline: hook, subtext: "", stat: null };
+    const hook = (draft.hook_preview || (draft.post_text || "").split("\n").filter(Boolean)[0] || "").slice(0, 100);
+    return { layout: forceLayout || "statement", theme: "dark", eyebrow: (draft.pillar || "").toString().slice(0, 40), headline: hook, subtext: "", stat: null, lines: [], highlight: [] };
   }
 }
 
@@ -147,10 +160,10 @@ function buildCardBackgroundSvg(brand: any, layout: string, w: number, h: number
       `<path d="M ${ox} ${qy + s} C ${ox} ${qy + s * 0.35}, ${ox + s * 0.35} ${qy}, ${ox + s * 0.55} ${qy} L ${ox + s * 0.55} ${qy + s * 0.32} C ${ox + s * 0.42} ${qy + s * 0.32}, ${ox + s * 0.3} ${qy + s * 0.5}, ${ox + s * 0.3} ${qy + s} Z" fill="${accent}" fill-opacity="0.9"/>`;
     flourish = `${mark(qx)}${mark(qx + s * 0.7)}`;
   } else if (layout === "stat") {
-    // accent arc ring reminiscent of a progress dial, upper area
-    const cx = Math.round(w * 0.30), cy = Math.round(h * 0.34), r = Math.round(w * 0.16);
-    flourish = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${shade(brand.bg, 18)}" stroke-width="14"/>
-      <path d="M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx - r * 0.6} ${cy + r * 0.8}" fill="none" stroke="${accent}" stroke-width="14" stroke-linecap="round"/>`;
+    // accent arc ring centered behind where the stat number sits (upper-left block)
+    const cx = Math.round(w * 0.32), cy = Math.round(h * 0.40), r = Math.round(w * 0.20);
+    flourish = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${brand.isLight ? "rgba(0,0,0,0.08)" : shade(brand.bg, 16)}" stroke-width="12"/>
+      <path d="M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx - r * 0.55} ${cy + r * 0.83}" fill="none" stroke="${accent}" stroke-width="12" stroke-linecap="round"/>`;
   } else {
     flourish = `<rect x="${pad}" y="${Math.round(h * 0.24)}" width="72" height="9" rx="4" fill="${accent}"/>`;
   }
@@ -190,10 +203,29 @@ function buildCardUrl(cloudName: string, basePublicId: string, brand: any, spec:
   }
 
   if (spec.layout === "stat" && spec.stat) {
-    // HUGE stat value, then caption, then supporting headline — vertically arranged
-    layers.push(L(Math.round(w * 0.22), "bold", spec.stat.value, accentRgb, `,g_north_west,x_${pad},y_${Math.round(h * 0.26)}`));
-    if (spec.stat.caption) layers.push(L(Math.round(w * 0.045), "bold", spec.stat.caption, textRgb, `,g_north_west,x_${pad},y_${Math.round(h * 0.50)},w_${wrapW},c_fit`));
-    if (spec.headline) layers.push(L(Math.round(w * 0.038), "normal", spec.headline, mutedRgb, `,g_north_west,x_${pad},y_${Math.round(h * 0.64)},w_${wrapW},c_fit`));
+    // HUGE stat value centered on the ring, then caption, then supporting headline
+    layers.push(L(Math.round(w * 0.20), "bold", spec.stat.value, accentRgb, `,g_north_west,x_${Math.round(w * 0.14)},y_${Math.round(h * 0.30)}`));
+    if (spec.stat.caption) layers.push(L(Math.round(w * 0.05), "bold", spec.stat.caption, textRgb, `,g_north_west,x_${pad},y_${Math.round(h * 0.56)},w_${wrapW},c_fit`));
+    if (spec.headline) layers.push(L(Math.round(w * 0.036), "normal", spec.headline, mutedRgb, `,g_north_west,x_${pad},y_${Math.round(h * 0.70)},w_${wrapW},c_fit`));
+  } else if (spec.layout === "highlight" && (spec.lines || []).length) {
+    // Stacked short lines; flagged lines get an accent marker background (dark text on accent)
+    const lines = spec.lines.slice(0, 4);
+    const longest = Math.max(...lines.map((l: string) => l.length), 1);
+    const fs = headlineSize(longest * 1.6, w); // size by longest line so nothing overflows
+    const lh = Math.round(fs * 1.32);
+    const total = lines.length * lh;
+    const startY = Math.round((h - total) / 2);
+    const hiBg = brand.isLight ? "fbe36b" : accentRgb;       // yellow marker on light, accent on dark
+    const hiText = brand.isLight ? "16161b" : hexToRgb(brand.bg);
+    lines.forEach((ln: string, i: number) => {
+      const isHi = (spec.highlight || []).some((h2: string) => h2.trim().toLowerCase() === ln.trim().toLowerCase());
+      const y = startY + i * lh;
+      if (isHi) {
+        layers.push(`l_text:${CARD_FONT}_${fs}_bold:${encodeOverlayText(" " + ln + " ")},co_rgb:${hiText},b_rgb:${hiBg},g_north_west,x_${pad},y_${y}`);
+      } else {
+        layers.push(`l_text:${CARD_FONT}_${fs}_bold:${encodeOverlayText(ln)},co_rgb:${textRgb},g_north_west,x_${pad},y_${y}`);
+      }
+    });
   } else {
     // statement / quote — big centered headline (quote uses accent color)
     const hl = spec.headline || "";
@@ -213,29 +245,55 @@ function buildCardUrl(cloudName: string, basePublicId: string, brand: any, spec:
   return `https://res.cloudinary.com/${encodeURIComponent(cloudName)}/image/upload/${layers.join("/")}/${basePublicId}.png`;
 }
 
-async function renderBrandedCards({ admin, draft, brandConfig, keys }: any) {
-  const brand = resolveBrand(brandConfig);
+async function renderBrandedCards({ draft, brandConfig, keys, spec }: any) {
+  const brand = resolveBrand(brandConfig, spec.theme);
   const { w, h } = cardDims(draft);
   const folder = `${keys.cloudinaryFolder || "social-agent"}/drafts/${draft.id}`;
 
-  // 1) AI designs the card (layout + display copy)
-  const spec = await buildCardSpec(keys.anthropic, draft);
-
-  // 2) upload the layout-aware vector background
   const svg = buildCardBackgroundSvg(brand, spec.layout, w, h);
   const dataUri = `data:image/svg+xml;base64,${base64Encode(svg)}`;
   const uploaded = await uploadToCloudinary({
     cloudName: keys.cloudinaryCloud, apiKey: keys.cloudinaryKey, apiSecret: keys.cloudinarySecret,
-    file: dataUri, folder, publicId: "card-bg", resourceType: "image",
+    file: dataUri, folder, publicId: `card-bg-${Date.now()}`, resourceType: "image",
   });
-
-  // 3) build the delivery URL with text overlays
   const url = buildCardUrl(keys.cloudinaryCloud, uploaded.publicId, brand, spec, w, h);
 
   return [{
     slot: "cover", url, cloudinaryPublicId: uploaded.publicId,
     width: w, height: h, model: "branded-card", size: `${w}x${h}`,
-    style: "branded", layout: spec.layout, headline: spec.headline, generatedAt: Date.now(),
+    mediaType: "branded_card", layout: spec.layout, theme: spec.theme, headline: spec.headline, generatedAt: Date.now(),
+  }];
+}
+
+// Build a gpt-image-2 prompt that RENDERS a designed branded card (text included).
+// Honest note: gpt-image-2 can render short text but may distort it — keep copy tight.
+function buildAiCardPrompt(brand: any, spec: any): string {
+  const headline = (spec.layout === "stat" && spec.stat) ? `${spec.stat.value} — ${spec.stat.caption}` : spec.headline;
+  return [
+    `A premium, modern social media graphic — a designed quote/insight card, NOT a photo.`,
+    `Background: deep ${brand.isLight ? "off-white" : "near-black"} (${brand.bg}) with a subtle ${brand.accent} glow and a clean editorial layout.`,
+    `Render this EXACT text large, bold, perfectly spelled, as the hero, in a clean geometric sans-serif: "${headline.replace(/"/g, "'")}".`,
+    spec.eyebrow ? `A small ${brand.accent} eyebrow label reading "${spec.eyebrow}" above it.` : "",
+    `Use ${brand.accent} as the single accent color to emphasize one key word. Generous negative space, strong typographic hierarchy, balanced composition, tasteful — like a top brand's LinkedIn carousel slide.`,
+    `Flat graphic-design look, crisp vector-like typography, high contrast, legible. No photographic scene, no people, no clutter, no watermark, no gibberish text — the text must be spelled exactly as given.`,
+  ].filter(Boolean).join(" ");
+}
+
+async function renderAiCard({ draft, brandConfig, keys, spec }: any) {
+  const brand = resolveBrand(brandConfig, spec.theme);
+  const { w, h } = cardDims(draft);
+  const size = h > w ? "1024x1536" : "1024x1024";
+  const folder = `${keys.cloudinaryFolder || "social-agent"}/drafts/${draft.id}`;
+  const prompt = buildAiCardPrompt(brand, spec);
+  const dataUri = await generateImageOpenAI({ apiKey: keys.openai, prompt, size, quality: "high" });
+  const uploaded = await uploadToCloudinary({
+    cloudName: keys.cloudinaryCloud, apiKey: keys.cloudinaryKey, apiSecret: keys.cloudinarySecret,
+    file: dataUri, folder, publicId: `ai-card-${Date.now()}`, resourceType: "image",
+  });
+  return [{
+    slot: "cover", url: uploaded.secureUrl, cloudinaryPublicId: uploaded.publicId,
+    width: w, height: h, model: "gpt-image-2", size,
+    mediaType: "ai_card", layout: spec.layout, theme: spec.theme, headline: spec.headline, generatedAt: Date.now(),
   }];
 }
 
@@ -327,20 +385,41 @@ export async function runImageGeneration({ admin, userId, draftId, brandConfig, 
 
   try {
     const vs = brandConfig.visualStyle || brandConfig.visual_style || {};
-    const imageStyle = (vs.imageStyle || "branded").toLowerCase(); // "branded" (default) | "photo"
+    const mode = (vs.imageStyle || "mix").toLowerCase(); // mix (default) | branded | ai_card | photo
+    const dims = cardDims(draft);
 
-    // ---- DEFAULT: designer-grade branded card (text-on-brand, no AI-photo look) ----
-    if (imageStyle !== "photo") {
-      const items = await renderBrandedCards({ admin, draft, brandConfig, keys });
-      const dims = cardDims(draft);
-      await admin.from("drafts").update({
-        images: { status: "ready", items, aspect: `${dims.w}x${dims.h}`, style: "branded", error: null },
-        updated_at: new Date().toISOString(),
-      }).eq("id", draftId);
-      return { imagesCreated: items.length, style: "branded" };
+    // Decide what to make this time. "mix" rotates so the agent tries all styles
+    // (the learning loop will later bias these weights toward what performs).
+    let make = mode;
+    if (mode === "mix" || mode === "auto") {
+      const r = Math.random();
+      make = r < 0.62 ? "branded" : (r < 0.80 ? "ai_card" : "photo");
     }
 
-    // ---- ALTERNATE: photographic image via OpenAI (authentic-realism prompts) ----
+    // Card-based styles need a design spec (layout + curiosity copy)
+    if (make === "branded" || make === "ai_card") {
+      // In mix, nudge layout variety by suggesting a random one
+      const layoutPool = ["statement", "quote", "stat", "highlight"];
+      const forced = (mode === "mix" || mode === "auto") ? layoutPool[Math.floor(Math.random() * layoutPool.length)] : undefined;
+      const spec = await buildCardSpec(keys.anthropic, draft, forced);
+
+      let items;
+      try {
+        items = make === "ai_card" ? await renderAiCard({ draft, brandConfig, keys, spec })
+                                   : await renderBrandedCards({ draft, brandConfig, keys, spec });
+      } catch (e) {
+        // If the AI card fails (e.g. text rendering/openai), fall back to the reliable Cloudinary card
+        if (make === "ai_card") items = await renderBrandedCards({ draft, brandConfig, keys, spec });
+        else throw e;
+      }
+      await admin.from("drafts").update({
+        images: { status: "ready", items, aspect: `${items[0]?.width}x${items[0]?.height}`, style: items[0]?.mediaType || "branded_card", error: null },
+        updated_at: new Date().toISOString(),
+      }).eq("id", draftId);
+      return { imagesCreated: items.length, style: items[0]?.mediaType };
+    }
+
+    // ---- PHOTO: conceptual/editorial gpt-image-2 (no text) ----
     const slots = deriveImageSlots(draft);
     if (slots.length === 0) {
       await admin.from("drafts").update({ images: { status: "none", error: "No image slots for this draft format" }, updated_at: new Date().toISOString() }).eq("id", draftId);

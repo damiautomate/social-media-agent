@@ -253,7 +253,7 @@ export async function runDirectPublish({ admin, userId, draftId, mediaPreference
       const hasVideo = (j(draft.avatar_video) || {}).status === "ready" || ((j(draft.broll) || {}).clips || []).length > 0;
       let mediaType = "text";
       if (hasVideo) mediaType = "video";
-      else if (hasImages) mediaType = imgs.style === "branded" ? "branded_card" : "photo";
+      else if (hasImages) mediaType = imgs.style || imgs.items[0]?.mediaType || "photo";
       const tags = (j(draft.hashtags) || []);
       await admin.from("post_performance").insert({
         user_id: userId,
@@ -262,7 +262,7 @@ export async function runDirectPublish({ admin, userId, draftId, mediaPreference
         provider: "direct",
         provider_post_id: (postIds && postIds[0]) || null,
         media_type: mediaType,
-        card_layout: (hasImages && imgs.style === "branded") ? (imgs.items[0]?.layout || null) : null,
+        card_layout: hasImages ? (imgs.items[0]?.layout || null) : null,
         format_type: draft.format_type || null,
         pillar: draft.pillar || null,
         hashtags_count: Array.isArray(tags) ? tags.length : 0,
