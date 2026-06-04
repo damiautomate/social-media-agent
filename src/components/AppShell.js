@@ -8,9 +8,14 @@ import { useRouter } from "next/navigation";
 const NAV = [
   { key: "dashboard", label: "Studio", href: "/", icon: IconSpark },
   { key: "ideas", label: "Ideas", href: "/ideas", icon: IconBulb },
+  { key: "insights", label: "Insights", href: "/insights", icon: IconChart },
   { key: "bootstrap", label: "Brand", href: "/bootstrap", icon: IconWand },
   { key: "settings", label: "Settings", href: "/settings", icon: IconGear },
 ];
+
+function IconChart(props) {
+  return (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6"/><rect x="12" y="7" width="3" height="10"/><rect x="17" y="13" width="3" height="4"/></svg>);
+}
 
 export function AppShell({ active, onSignOut, children }) {
   const router = useRouter();

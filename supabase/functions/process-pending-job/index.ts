@@ -13,6 +13,7 @@ import { runBootstrap } from "./bootstrap.ts";
 import { runImageGeneration, runAvatarVideo, runBroll } from "./media.ts";
 import { runPublish } from "./publish.ts";
 import { runDirectPublish } from "./direct-publish.ts";
+import { runMetricsRefresh } from "./metrics.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -102,6 +103,11 @@ async function processJob(job: any) {
   };
 
   switch (job.type) {
+    case "metrics": {
+      const r = await runMetricsRefresh({ admin, userId: job.user_id });
+      await finish({ error: null });
+      return;
+    }
     case "draft": {
       await handleDraft(job); // sets its own completed status
       return;

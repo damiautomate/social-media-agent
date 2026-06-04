@@ -32,7 +32,7 @@ export const PROVIDERS = {
     clientIdEnv: "LINKEDIN_CLIENT_ID",
     clientSecretEnv: "LINKEDIN_CLIENT_SECRET",
     // openid+profile to identify the member; w_member_social to post on their behalf
-    scopes: ["openid", "profile", "w_member_social"],
+    scopes: ["openid", "profile", "w_member_social", "r_member_social"],
     authorizeUrl({ clientId, redirectUri, state, scope }) {
       const p = new URLSearchParams({ response_type: "code", client_id: clientId, redirect_uri: redirectUri, state, scope });
       return `https://www.linkedin.com/oauth/v2/authorization?${p}`;

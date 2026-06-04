@@ -428,3 +428,23 @@ export async function getSocialConnectionWithTokens(userId, platform) {
 export async function deleteSocialConnection(userId, platform) {
   await supabaseAdmin.from("social_connections").delete().eq("user_id", userId).eq("platform", platform);
 }
+
+// ---------- learning loop: performance reads + manual metrics ----------
+export async function listPostPerformance(userId, limit = 200) {
+  const { data } = await supabaseAdmin.from("post_performance")
+    .select("*").eq("user_id", userId).order("posted_at", { ascending: false }).limit(limit);
+  return data || [];
+}
+
+export async function updatePostMetricsManual(userId, id, metrics) {
+  const reactions = Number(metrics.reactions) || 0;
+  const comments = Number(metrics.comments) || 0;
+  const shares = Number(metrics.shares) || 0;
+  const impressions = metrics.impressions != null && metrics.impressions !== "" ? Number(metrics.impressions) : null;
+  const engagement = reactions + comments + shares;
+  const engagement_rate = impressions ? Number((engagement / impressions).toFixed(4)) : null;
+  await supabaseAdmin.from("post_performance").update({
+    reactions, comments, shares, impressions, engagement, engagement_rate,
+    metrics_source: "manual", metrics_fetched_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+  }).eq("id", id).eq("user_id", userId);
+}
