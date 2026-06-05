@@ -285,7 +285,7 @@ async function renderAiCard({ draft, brandConfig, keys, spec }: any) {
   const size = h > w ? "1024x1536" : "1024x1024";
   const folder = `${keys.cloudinaryFolder || "social-agent"}/drafts/${draft.id}`;
   const prompt = buildAiCardPrompt(brand, spec);
-  const dataUri = await generateImageOpenAI({ apiKey: keys.openai, prompt, size, quality: "high" });
+  const dataUri = await generateImageOpenAI({ apiKey: keys.openai, prompt, size, quality: "medium" });
   const uploaded = await uploadToCloudinary({
     cloudName: keys.cloudinaryCloud, apiKey: keys.cloudinaryKey, apiSecret: keys.cloudinarySecret,
     file: dataUri, folder, publicId: `ai-card-${Date.now()}`, resourceType: "image",
@@ -348,11 +348,23 @@ function imagePrompterUser(draft: any, slots: any[]): string {
 
 // OpenAI GPT Image 2 — always returns b64_json
 async function generateImageOpenAI({ apiKey, prompt, size, quality = "medium" }: any): Promise<string> {
-  const res = await fetch("https://api.openai.com/v1/images/generations", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "gpt-image-2", prompt, size, quality, n: 1 }),
-  });
+  // Hard timeout so a slow/stalled OpenAI request throws (and the caller can fall back
+  // or mark the draft failed) instead of hanging until the edge function is killed.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 60000);
+  let res: Response;
+  try {
+    res = await fetch("https://api.openai.com/v1/images/generations", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "gpt-image-2", prompt, size, quality, n: 1 }),
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    throw new Error((e as Error)?.name === "AbortError" ? "OpenAI image timed out after 60s" : `OpenAI image request failed: ${(e as Error)?.message}`);
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(`OpenAI images HTTP ${res.status}: ${detail.slice(0, 300)}`);
